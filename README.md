@@ -89,7 +89,3 @@ Les réglages se trouvent dans `src/sim.h` :
 - Structure d'app basée sur [epsilon-sample-app-c](https://github.com/numworks/epsilon-sample-app-c) de NumWorks (licence BSD-3-Clause).
 - Outil de liaison [`nwlink`](https://www.npmjs.com/package/nwlink).
 - Inspiré de BeamNG.drive.
-
-## Licence
-
-À compléter : ajoute un fichier `LICENSE` (par exemple MIT ou GPL-3.0).
