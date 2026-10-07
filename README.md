@@ -14,7 +14,7 @@ La voiture n'est pas une image : c'est un **squelette de 11 points reliés par 2
 - Le terrain est une route infinie avec collines, rampes et murs.
 - Le jeu affiche la vitesse, le pourcentage de dégâts et la distance parcourue. La carrosserie fonce quand les dégâts augmentent.
 
-C'est en **2D, vue de côté** : la 3D ne tiendrait pas sur le processeur de la calculatrice.
+C'est en **2D, vue de côté** 
 
 ## Commandes
 
