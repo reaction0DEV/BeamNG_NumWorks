@@ -58,14 +58,18 @@ static void terrain(int xl) {
         else {
           int rx, rz0; city_nearest(X, Z, &rx, &rz0);
           float cxg, czg; city_center(rx, rz0, &cxg, &czg); float ax = X - cxg, az = Z - czg; if (ax < 0) ax = -ax; if (az < 0) az = -az;
-          float roadX = cityPlan == 1 ? 5.2f : (cityPlan == 2 ? 3.1f : 3.8f), roadZ = cityPlan == 1 ? 4.8f : (cityPlan == 2 ? 3.1f : 3.8f);
-          if (ax < roadX || az < roadZ) { r = 48; g = 53; b = 57; if ((ax < .12f || az < .12f) && (((int)(X + Z) / 4) & 1)) { r = 220; g = 190; b = 95; } }
-          else if (ax < roadX + 1.5f || az < roadZ + 1.5f) { r = 118; g = 116; b = 105; }
+          float roadX = 14.f - ax, roadZ = 18.f - az;
+          int building = ax < 8.5f && az < 11.f;
+          int onRoadX = !building && roadX < 3.8f, onRoadZ = !building && roadZ < 3.8f;
+          int onSidewalk = !building && !onRoadX && !onRoadZ && (roadX < 5.5f || roadZ < 7.f);
+          if (building || onSidewalk) { r = 118; g = 116; b = 105; }
+          else if (onRoadX || onRoadZ) { r = 48; g = 53; b = 57; if ((roadX < .12f || roadZ < .12f) && (((int)(X + Z) / 4) & 1)) { r = 220; g = 190; b = 95; } }
           else { r = 73 + ck * 5; g = 103 + ck * 5; b = 74; if (ad < 18.f && st) { r = 52; g = 80; b = 58; } }
-          int cross = (ax < roadX + 4.f && az < roadZ + 4.f) && (((int)(X * 1.8f) & 3) == 0 || ((int)(Z * 1.8f) & 3) == 0);
+          int cross = ((onRoadX && roadZ < 7.f && (((int)(Z * 1.8f) & 3) == 0)) || (onRoadZ && roadX < 7.f && (((int)(X * 1.8f) & 3) == 0)));
           if (cross) { r = 205; g = 200; b = 178; }
-          if (cityPlan == 2 && ax < roadX && az < roadZ && (((int)(X * 3.f + Z * 2.f) & 15) == 0)) { r = 215; g = 195; b = 115; }
-          if (weatherMode == 1 && (ax < roadX || az < roadZ)) { r = (r * 3) / 4; g = (g * 4) / 5; b = (b * 9) / 10; }
+          if (cityPlan == 2 && (onRoadX || onRoadZ) && (((int)(X * 3.f + Z * 2.f) & 15) == 0)) { r = 215; g = 195; b = 115; }
+          if (weatherMode == 1 && (onRoadX || onRoadZ)) { r = (r * 3) / 4; g = (g * 4) / 5; b = (b * 9) / 10; }
+          if (weatherMode == 3 && (onRoadX || onRoadZ)) { r = (r * 3) / 4; g = (g * 4) / 5; b = (b * 5) / 6; }
         }
       }
       else if (gfeat > .25f) { if (mapId == 1) { r = 175; g = 170; b = 150; } else { r = st ? 230 : 200; g = st ? 230 : 45; b = g; } }
@@ -458,8 +462,24 @@ static void city_manhole(float x, float z) {
   for (int i = 0; i < 12; i++) line((int)sx[i], (int)sy[i], (int)sx[(i + 1) % 12], (int)sy[(i + 1) % 12], C(115, 119, 116));
   for (int i = 0; i < 3; i++) { float a = i * 1.0472f, ax = x + .34f * fsin(a + 1.5708f), az = z + .34f * fsin(a), bx = x - .34f * fsin(a + 1.5708f), bz = z - .34f * fsin(a); city_line(ax, .03f, az, bx, .03f, bz, C(82, 87, 86)); }
 }
+static int city_occluded(float x, float y, float z) {
+  float dx = x - camx, dz = z - camz, depth = dx * camhx + dz * camhz;
+  if (depth <= .5f) return 0;
+  for (int i = 0; i < 16; i++) {
+    CityBlock *B = &cityBlocks[i];
+    float bx = B->x - camx, bz = B->z - camz, blockDepth = bx * camhx + bz * camhz;
+    if (blockDepth <= .5f || blockDepth >= depth - 1.f) continue;
+    float t = blockDepth / depth, rayX = camx + dx * t, rayZ = camz + dz * t, rayY = camy + (y - camy) * t;
+    if (rayX > B->x - 8.5f && rayX < B->x + 8.5f && rayZ > B->z - 11.f && rayZ < B->z + 11.f && rayY > 0.f && rayY < B->h) return 1;
+  }
+  return 0;
+}
 static void draw_city_details(int index) {
-  CityBlock *B = &cityBlocks[index]; float x = B->x + 14.f, z = B->z + 18.f;
+  int ix = index % 4 - 2, iz = index / 4 - 2;
+  float x0, z0, x1, z1, x2, z2, x3, z3;
+  city_center(ix, iz, &x0, &z0); city_center(ix + 1, iz, &x1, &z1);
+  city_center(ix, iz + 1, &x2, &z2); city_center(ix + 1, iz + 1, &x3, &z3);
+  float x = (x0 + x1 + x2 + x3) * .25f, z = (z0 + z1 + z2 + z3) * .25f;
   float depth = (x - camx) * camhx + (z - camz) * camhz, side = (x - camx) * camhz - (z - camz) * camhx;
   if (depth < 2.f || depth > zmax - 2.f || side < -depth * 1.25f || side > depth * 1.25f) return;
   uint16_t pole = C(58, 63, 65);
@@ -473,12 +493,15 @@ static void draw_city_details(int index) {
   city_line(x - 4.7f, 0, z - 4.6f, x - 4.7f, 5.7f, z - 4.6f, pole);
   city_line(x - 4.7f, 5.65f, z - 4.6f, x - 1.9f, 5.65f, z - 4.6f, pole);
   city_lamp(x - 1.9f, 5.58f, z - 4.6f, .24f, C(255, 232, 170));
-  city_line(x - 4.3f, 0, z + 4.8f, x - 4.3f, 2.55f, z + 4.8f, pole);
-  city_box(x - 4.3f, z + 4.8f, .58f, .10f, 2.25f, 2.78f, 42, 116, 70);
-  int signColor = index % 3 == 0 ? C(205, 65, 48) : (index % 3 == 1 ? C(50, 135, 82) : C(42, 105, 151));
-  city_box(x - 4.3f, z + 4.8f, .46f, .10f, 1.55f, 2.12f, (signColor >> 11) * 255 / 31, ((signColor >> 5) & 63) * 255 / 63, (signColor & 31) * 255 / 31);
-  city_line(x - 4.62f, 2.50f, z + 4.91f, x - 4.03f, 2.50f, z + 4.91f, C(220, 225, 210));
-  city_line(x - 4.55f, 1.68f, z + 4.91f, x - 4.05f, 1.68f, z + 4.91f, C(220, 225, 210));
+  float signX = x - 4.3f, signZ = z + 4.8f;
+  if (!city_occluded(signX, 2.f, signZ)) {
+    city_line(signX, 0, signZ, signX, 2.55f, signZ, pole);
+    city_box(signX, signZ, .58f, .10f, 2.25f, 2.78f, 42, 116, 70);
+    int signColor = index % 3 == 0 ? C(205, 65, 48) : (index % 3 == 1 ? C(50, 135, 82) : C(42, 105, 151));
+    city_box(signX, signZ, .46f, .10f, 1.55f, 2.12f, (signColor >> 11) * 255 / 31, ((signColor >> 5) & 63) * 255 / 63, (signColor & 31) * 255 / 31);
+    city_line(x - 4.62f, 2.50f, z + 4.91f, x - 4.03f, 2.50f, z + 4.91f, C(220, 225, 210));
+    city_line(x - 4.55f, 1.68f, z + 4.91f, x - 4.05f, 1.68f, z + 4.91f, C(220, 225, 210));
+  }
   city_manhole(x + 2.4f, z + 2.4f);
   if (index == 0) {
     city_box(x - 7.f, z - 5.f, 1.1f, .5f, .05f, .85f, 65, 118, 170);
