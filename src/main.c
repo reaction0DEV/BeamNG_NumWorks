@@ -17,7 +17,11 @@ static const int CRASHV[5] = {30, 50, 80, 110, 140};
 static float camhx = 0, camhz = 1, camx, camy = 5, camz, oHood, oDoor, oTrunk, tHood, tDoor, tTrunk;
 static uint64_t pk; static float wspin;
 
-static inline void px(int x, int y, uint16_t c) { if ((unsigned)x < LW && (unsigned)y < LH) { if (curZ >= 0 && zb[y * LW + x] < curZ) return; fb[y * LW + x] = c; } }
+static int blendA;
+static inline void px(int x, int y, uint16_t c) {
+  if ((unsigned)x < LW && (unsigned)y < LH) { if (curZ >= 0 && zb[y * LW + x] < curZ) return;
+    if (blendA) { uint16_t o = fb[y * LW + x]; int a = blendA, r = (((o >> 11) & 31) * (256 - a) + ((c >> 11) & 31) * a) >> 8, g = (((o >> 5) & 63) * (256 - a) + ((c >> 5) & 63) * a) >> 8, b = ((o & 31) * (256 - a) + (c & 31) * a) >> 8; c = (uint16_t)((r << 11) | (g << 5) | b); }
+    fb[y * LW + x] = c; } }
 static void line(int x0, int y0, int x1, int y1, uint16_t c) {
   int dx = x1 > x0 ? x1 - x0 : x0 - x1, dy = -(y1 > y0 ? y1 - y0 : y0 - y1), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
   for (int i = 0; i < 300; i++) { px(x0, y0, c); if (x0 == x1 && y0 == y1) break; int e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
@@ -91,11 +95,9 @@ static void wheel3d(float wx, float wy, float wz, float r, float ax, float az, f
   for (int k = 0; k < 3; k++) { float th = spin + k * 2.0944f, ex, ey;
     if (proj(wx + sg * hw * ax + .6f * r * fsin(th + 1.5708f) * fx, wy + .6f * r * fsin(th), wz + sg * hw * az + .6f * r * fsin(th + 1.5708f) * fz, &ex, &ey)) line((int)ncx, (int)ncy, (int)ex, (int)ey, C(55, 55, 60)); }
 }
-// ---- car: real nodes + virtual points (panels that open, engine block)
-static float PX[64], PY[64], PZ[64], sxp[64], syp[64], zr[64];
-static int np;
+// ---- car: curved patches skinned to the physics nodes, plus interior, engine, seats and trunk
+static float PX[128], PY[128], PZ[128]; static int np;
 static int vp(float x, float y, float z) { PX[np] = x; PY[np] = y; PZ[np] = z; return np++; }
-static int lerpn(int a, int b, float t) { return vp(PX[a] + (PX[b] - PX[a]) * t, PY[a] + (PY[b] - PY[a]) * t, PZ[a] + (PZ[b] - PZ[a]) * t); }
 static int rot(int p, int a, int b, float ang, int mode, float cx) {
   float ax = PX[b] - PX[a], ay = PY[b] - PY[a], az = PZ[b] - PZ[a], l = fsqrt(ax * ax + ay * ay + az * az) + 1e-4f; ax /= l; ay /= l; az /= l;
   float vx = PX[p] - PX[a], vy = PY[p] - PY[a], vz = PZ[p] - PZ[a], best = -1e9f, rx = 0, ry = 0, rz = 0;
@@ -113,64 +115,188 @@ static float shade(const float *x, const float *y, const float *z, int a, int b,
   float nl = fsqrt(nx * nx + ny * ny + nz * nz) + 1e-4f, lit = (.3f * nx + .8f * ny + .5f * nz) / nl / .97f; if (lit < 0) lit = -lit;
   return .5f + .5f * lit;
 }
+enum { M_BODY, M_GLASS, M_BLACK, M_CHROME, M_HEAD, M_TAIL, M_PLAS, M_INT, M_PLATE, M_INNER };
+enum { K_FLOOR, K_ARCH, K_ROCK, K_WALL, K_PILL, K_FRONT, K_REAR, K_ROOF, K_WIN, K_HOOD, K_BUMF, K_BUMR, K_TRUNK, K_DOOR };
+typedef struct { uint8_t n[4]; float s0, s1, t0, t1; uint8_t nu, nv, kind, grp, two, cls; float bulge; } Pat;
+#define NPAT 26
+static const Pat PAT[NPAT] = {
+  {{0,1,3,2},0,1,0,1,1,1,K_FLOOR,255,0,0,0},
+  {{0,2,8,6},0,.31f,0,1,3,2,K_ARCH,255,0,0,.05f},{{0,2,8,6},.69f,1,0,1,3,2,K_ARCH,255,0,0,.05f},{{0,2,8,6},.31f,.69f,0,.16f,2,1,K_ROCK,255,0,0,0},
+  {{1,3,9,7},0,.31f,0,1,3,2,K_ARCH,255,0,0,.05f},{{1,3,9,7},.69f,1,0,1,3,2,K_ARCH,255,0,0,.05f},{{1,3,9,7},.31f,.69f,0,.16f,2,1,K_ROCK,255,0,0,0},
+  {{0,2,8,6},.31f,.69f,.16f,1,1,1,K_WALL,255,0,1,0},{{20,18,12,10},0,1,0,1,1,1,K_WALL,255,0,1,0},
+  {{1,3,9,7},.31f,.69f,.16f,1,1,1,K_WALL,255,0,1,0},{{21,19,13,11},0,1,0,1,1,1,K_WALL,255,0,1,0},
+  {{20,18,12,10},0,.22f,0,1,1,2,K_PILL,255,0,0,0},{{21,19,13,11},0,.22f,0,1,1,2,K_PILL,255,0,0,0},
+  {{2,3,9,8},0,1,0,1,6,3,K_FRONT,255,0,0,.03f},{{0,1,7,6},0,1,0,1,6,3,K_REAR,255,0,0,.03f},
+  {{10,11,13,12},0,1,0,1,4,3,K_ROOF,255,0,0,.07f},{{20,21,11,10},0,1,0,1,6,4,K_WIN,255,0,0,.03f},
+  {{22,23,24,25},0,1,0,1,4,3,K_HOOD,0,1,0,.07f},{{26,27,28,29},0,1,0,1,5,2,K_BUMF,1,1,0,.09f},{{30,31,32,33},0,1,0,1,5,2,K_BUMR,2,1,0,.09f},
+  {{34,35,36,37},0,1,0,1,4,2,K_TRUNK,3,1,0,.05f},
+  {{38,39,40,41},0,1,0,1,5,6,K_DOOR,4,1,0,.03f},{{42,43,44,45},0,1,0,1,5,6,K_DOOR,5,1,0,.03f},
+  {{46,47,48,49},0,1,0,1,6,4,K_WIN,6,1,0,.04f},
+  {{0,2,8,6},0,.01f,0,.01f,1,1,K_FLOOR,255,0,2,0},{{1,3,9,7},0,.01f,0,.01f,1,1,K_FLOOR,255,0,2,0}};   // last two unused placeholders
+static int8_t psg[NPAT]; static int psgInit;
+static int cellmat(const Pat *p, int i, int j) {
+  switch (p->kind) {
+    case K_FLOOR: return M_BLACK;
+    case K_ARCH: return (i == 1 && j == 0) ? M_BLACK : M_BODY;
+    case K_ROCK: return M_PLAS;
+    case K_WALL: return M_INT;
+    case K_FRONT: if (j == 0) return M_BLACK; if (j == 1) return (i == 0 || i == 5) ? M_HEAD : ((i == 2 || i == 3) ? M_CHROME : M_BLACK); return M_BODY;
+    case K_REAR: if (j == 0) return M_BLACK; if (j == 1) return (i == 0 || i == 5) ? M_TAIL : ((i == 2 || i == 3) ? M_PLATE : M_BODY); return M_BODY;
+    case K_WIN: return (i >= 1 && i <= p->nu - 2 && j >= 1 && j <= p->nv - 2) ? M_GLASS : M_BODY;
+    case K_BUMF: return j == 0 ? ((i == 0 || i == 4) ? M_HEAD : M_PLAS) : M_BODY;
+    case K_BUMR: return j == 0 ? M_PLAS : ((i == 0 || i == 4) ? M_TAIL : M_BODY);
+    case K_DOOR: if (j <= 2) return (i == 1 && j == 2) ? M_CHROME : M_BODY; return (i >= 1 && i <= 3 && j <= 4) ? M_GLASS : M_BODY;
+    default: return M_BODY;
+  }
+}
+static uint16_t matcol(int m, float sh, float spec, float dk, const Veh *V) {
+  float r, g, b; spec *= 150.f;
+  switch (m) {
+    case M_BODY: r = V->r * sh * dk + spec; g = V->g * sh * dk + spec; b = V->b * sh * dk + spec; break;
+    case M_GLASS: r = 95 * (.7f + .3f * sh) + spec; g = 135 * (.7f + .3f * sh) + spec; b = 175 * (.7f + .3f * sh) + spec; break;
+    case M_BLACK: r = g = b = 24 * sh; break;
+    case M_CHROME: r = 190 * sh + spec; g = 190 * sh + spec; b = 200 * sh + spec; break;
+    case M_HEAD: r = 255; g = 250; b = 200; break;
+    case M_TAIL: r = brk > 0 ? 255 : 185; g = brk > 0 ? 40 : 18; b = brk > 0 ? 40 : 18; break;
+    case M_PLAS: r = g = 44 * sh; b = 50 * sh; break;
+    case M_INT: r = 46 * sh; g = 44 * sh; b = 52 * sh; break;
+    case M_PLATE: r = 235 * sh; g = 235 * sh; b = 222 * sh; break;
+    default: r = 76 * sh; g = 78 * sh; b = 84 * sh;
+  }
+  if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255; return C((int)r, (int)g, (int)b);
+}
+// frames for solids: 0 = chassis (rigid fit), 1 = engine, 2/3 = seats
+static float CFO[3], CFX[3], CFY[3], CFZ[3], bxm, bym, bzm;
+static void fpt(int fr, float a, float b, float c, float *x, float *y, float *z) {
+  if (fr == 0) { a -= bxm; b -= bym; c -= bzm; *x = CFO[0] + a * CFX[0] + b * CFY[0] + c * CFZ[0]; *y = CFO[1] + a * CFX[1] + b * CFY[1] + c * CFZ[1]; *z = CFO[2] + a * CFX[2] + b * CFY[2] + c * CFZ[2]; return; }
+  int i0, i1, i2, i3 = -1; if (fr == 1) { i0 = 50; i1 = 51; i2 = 52; i3 = 53; } else if (fr == 2) { i0 = 54; i1 = 55; i2 = 56; } else { i0 = 57; i1 = 58; i2 = 59; }
+  float ex = PX[i1] - PX[i0], ey = PY[i1] - PY[i0], ez = PZ[i1] - PZ[i0], fx = PX[i2] - PX[i0], fy = PY[i2] - PY[i0], fz = PZ[i2] - PZ[i0], ux, uy, uz;
+  if (i3 >= 0) { ux = PX[i3] - PX[i0]; uy = PY[i3] - PY[i0]; uz = PZ[i3] - PZ[i0]; }
+  else { ux = fy * ez - fz * ey; uy = fz * ex - fx * ez; uz = fx * ey - fy * ex; float l = fsqrt(ux * ux + uy * uy + uz * uz) + 1e-4f, w = fsqrt(ex * ex + ey * ey + ez * ez); ux *= w / l; uy *= w / l; uz *= w / l; }
+  *x = PX[i0] + a * ex + b * ux + c * fx; *y = PY[i0] + a * ey + b * uy + c * fy; *z = PZ[i0] + a * ez + b * uz + c * fz;
+}
+typedef struct { uint8_t fr, cond; float a0, a1, b0, b1, c0, c1; uint8_t r, g, b; } Bx;
+// cond: 0 always, 1 trunk visible, 2 engine bay visible, 3 engine visible, 4 turbo only
+static const Bx BXS[] = {
+  {0,0,-.82f,.82f,.7f,.98f,.5f,.8f,52,50,58},{0,0,-.62f,-.3f,.9f,.95f,.4f,.52f,30,30,34},{0,0,-.48f,-.44f,.78f,.9f,.45f,.6f,30,30,34},{0,0,-.1f,.1f,.45f,.72f,-.3f,.55f,55,55,62},
+  {0,0,-.8f,.8f,.45f,.62f,-1.f,-.45f,70,68,76},{0,0,-.8f,.8f,.62f,1.1f,-1.08f,-.95f,70,68,76},{0,0,-.85f,.85f,.38f,.44f,-1.1f,.8f,48,46,52},
+  {0,1,-.82f,.82f,.5f,.56f,-1.98f,-1.3f,60,58,60},{0,1,-.88f,-.82f,.56f,.95f,-1.98f,-1.3f,70,70,74},{0,1,.82f,.88f,.56f,.95f,-1.98f,-1.3f,70,70,74},{0,1,-.82f,.82f,.56f,.98f,-1.34f,-1.28f,66,64,70},
+  {0,1,-.38f,.38f,.56f,.7f,-1.85f,-1.45f,30,30,34},{0,1,.1f,.72f,.56f,.86f,-1.9f,-1.55f,140,64,40},{0,1,-.82f,.82f,.56f,.95f,-1.99f,-1.93f,80,80,86},
+  {0,2,-.85f,.85f,.36f,.4f,.8f,2.05f,50,50,55},{0,2,-.9f,-.85f,.4f,.88f,.8f,2.05f,64,64,70},{0,2,.85f,.9f,.4f,.88f,.8f,2.05f,64,64,70},{0,2,-.85f,.85f,.4f,.95f,.76f,.82f,58,58,64},
+  {0,2,-.7f,.7f,.42f,.85f,1.95f,2.02f,35,35,40},{0,2,.45f,.8f,.4f,.62f,1.55f,1.8f,25,30,60},{0,2,-.8f,-.6f,.4f,.55f,1.3f,1.5f,50,90,200},
+  {1,3,0,1,0,.62f,0,1,0,0,0},{1,3,.08f,.92f,.62f,.82f,.1f,.9f,170,170,180},{1,3,.3f,.7f,.82f,1.f,.2f,.75f,95,95,100},{1,3,.15f,.4f,.15f,.4f,1.f,1.1f,200,200,205},
+  {1,3,.6f,.9f,.1f,.4f,1.f,1.08f,40,40,44},{1,3,1.f,1.1f,.1f,.5f,.1f,.9f,150,80,40},{1,4,-.4f,0,.15f,.5f,.2f,.6f,230,90,40},
+  {2,0,0,1,0,.28f,0,1,45,45,55},{3,0,0,1,0,.28f,0,1,45,45,55},{2,0,0,1,.28f,2.f,-.18f,.04f,50,50,60},{3,0,0,1,.28f,2.f,-.18f,.04f,50,50,60},{2,0,.25f,.75f,2.f,2.5f,-.14f,0,45,45,55},{3,0,.25f,.75f,2.f,2.5f,-.14f,0,45,45,55}};
+#define NBX ((int)(sizeof(BXS) / sizeof(BXS[0])))
+static float gx[64], gy[64], gz3[64], g3x[64], g3y[64], g3z[64];
+static const uint8_t HULLS = 0;
+// draw one patch; pass 0 = glass of far-side patches, 2 = opaque cells, 3 = glass cells of near patches
+#ifndef DBG_HIDE
+#define DBG_HIDE 0
+#endif
+static void drawpat(int pi, int pass, int facing, float cxm) {
+  if (((DBG_HIDE & 1) && PAT[pi].kind == K_HOOD) || ((DBG_HIDE & 2) && PAT[pi].kind == K_TRUNK) || ((DBG_HIDE & 4) && PAT[pi].kind == K_DOOR) || ((DBG_HIDE & 8) && (PAT[pi].kind == K_ROOF || PAT[pi].kind == K_WIN))) return;
+  const Pat *p = &PAT[pi]; int ni[4], nu = p->nu, nv = p->nv; const Veh *V = &VEH[cv]; float dk = 1.f - dmg * .006f;
+  for (int k = 0; k < 4; k++) ni[k] = p->n[k];
+  float c[4][3]; for (int k = 0; k < 4; k++) { c[k][0] = PX[ni[k]]; c[k][1] = PY[ni[k]]; c[k][2] = PZ[ni[k]]; }
+  float ax = c[1][0] - c[0][0], ay = c[1][1] - c[0][1], az = c[1][2] - c[0][2], bx = c[3][0] - c[0][0], by = c[3][1] - c[0][1], bz = c[3][2] - c[0][2];
+  float nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx, nl = fsqrt(nx * nx + ny * ny + nz * nz) + 1e-4f, sg = psg[pi]; nx *= sg / nl; ny *= sg / nl; nz *= sg / nl;
+  for (int j = 0; j <= nv; j++) for (int i = 0; i <= nu; i++) {
+    float s = p->s0 + (p->s1 - p->s0) * i / nu, t = p->t0 + (p->t1 - p->t0) * j / nv, w = p->bulge * 16.f * s * (1 - s) * t * (1 - t); if (w < 0) w = 0;
+    float x = (1 - s) * (1 - t) * c[0][0] + s * (1 - t) * c[1][0] + s * t * c[2][0] + (1 - s) * t * c[3][0] + nx * w, y = (1 - s) * (1 - t) * c[0][1] + s * (1 - t) * c[1][1] + s * t * c[2][1] + (1 - s) * t * c[3][1] + ny * w,
+          z = (1 - s) * (1 - t) * c[0][2] + s * (1 - t) * c[1][2] + s * t * c[2][2] + (1 - s) * t * c[3][2] + nz * w; int k = j * (nu + 1) + i;
+    g3x[k] = x; g3y[k] = y; g3z[k] = z; if (!proj(x, y, z, &gx[k], &gy[k])) return;
+    gz3[k] = (x - camx) * camhx + (z - camz) * camhz;
+  }
+  int i0 = gz3[0] > gz3[nu] ? 0 : nu - 1, di = i0 == 0 ? 1 : -1, j0 = gz3[0] > gz3[nv * (nu + 1)] ? 0 : nv - 1, dj = j0 == 0 ? 1 : -1;
+  for (int jj = 0, j = j0; jj < nv; jj++, j += dj) for (int ii = 0, i = i0; ii < nu; ii++, i += di) {
+    int m = cellmat(p, i, j), glass = m == M_GLASS;
+    if (pass == 2 && glass) continue; if (pass != 2 && !glass) continue;
+    int k0 = j * (nu + 1) + i, k1 = k0 + 1, k2 = k1 + nu + 1, k3 = k0 + nu + 1;
+    float ex = g3x[k1] - g3x[k0], ey = g3y[k1] - g3y[k0], ez = g3z[k1] - g3z[k0], fx = g3x[k3] - g3x[k0], fy = g3y[k3] - g3y[k0], fz = g3z[k3] - g3z[k0];
+    float qx = ey * fz - ez * fy, qy = ez * fx - ex * fz, qz = ex * fy - ey * fx, ql = fsqrt(qx * qx + qy * qy + qz * qz) + 1e-4f;
+    float lit = (.3f * qx + .8f * qy + .5f * qz) / ql / .97f; if (lit < 0) lit = -lit;
+    float sh = .45f + .55f * lit, spec = lit > .86f ? (lit - .86f) * 7.f : 0; if (spec > 1) spec = 1;
+    float xs[4] = {gx[k0], gx[k1], gx[k2], gx[k3]}, ys[4] = {gy[k0], gy[k1], gy[k2], gy[k3]};
+    if (!facing && p->two && !glass) m = M_INNER;
+    uint16_t col = matcol(m, sh, (m == M_BODY || m == M_GLASS || m == M_CHROME) ? spec : 0, dk, V);
+    if (glass) { blendA = 150; quad(xs, ys, col); blendA = 0; } else quad(xs, ys, col);
+  }
+  if (pass != 2 && p->kind == K_WIN && p->grp == 6 && (pAtt[6] < pAtt0[6] || dmg > 40)) {   // cracked windshield
+    static const uint8_t L2[8][2] = {{0,0},{5,0},{0,4},{5,4},{3,0},{3,4},{0,2},{5,2}}; int ck = 2 * (nu + 1) + 3;
+    for (int q = 0; q < 8; q++) line((int)gx[ck], (int)gy[ck], (int)gx[L2[q][1] * (nu + 1) + L2[q][0]], (int)gy[L2[q][1] * (nu + 1) + L2[q][0]], C(235, 240, 245));
+  }
+}
+static void drawbx(int bi) {
+  const Bx *B = &BXS[bi]; float x[8], y[8], z[8], sx[8], sy[8], zz[8];
+  for (int i = 0; i < 8; i++) { fpt(B->fr, (i & 1) ? B->a1 : B->a0, ((i >> 1) & 1) ? B->b1 : B->b0, ((i >> 2) & 1) ? B->c1 : B->c0, &x[i], &y[i], &z[i]);
+    float dx = x[i] - camx, dz = z[i] - camz; zz[i] = dx * camhx + dz * camhz; if (zz[i] < .5f) return; sx[i] = CXc + (dx * camhz - dz * camhx) / zz[i] * FOC; sy[i] = HOR - (y[i] - camy) / zz[i] * FOC; }
+  static const uint8_t FB[6][4] = {{0,2,6,4},{1,3,7,5},{0,1,5,4},{2,3,7,6},{0,1,3,2},{4,5,7,6}};
+  int id[6]; float dp[6]; for (int f = 0; f < 6; f++) { id[f] = f; dp[f] = (zz[FB[f][0]] + zz[FB[f][1]] + zz[FB[f][2]] + zz[FB[f][3]]) * .25f; }
+  for (int i = 1; i < 6; i++) { int a = id[i]; float v = dp[i]; int j = i - 1; while (j >= 0 && dp[j] < v) { id[j + 1] = id[j]; dp[j + 1] = dp[j]; j--; } id[j + 1] = a; dp[j + 1] = v; }
+  int r = B->r, g = B->g, b = B->b; float kk = (B->cond >= 3) ? 1.f : 1.9f;
+  if (B->fr == 1 && B->cond == 3 && B->a1 == 1 && B->b1 < .7f) { r = ENG[ce].r; g = ENG[ce].g; b = ENG[ce].b; }
+  r = (int)(r * kk); g = (int)(g * kk); b = (int)(b * kk); if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+  for (int k = 0; k < 6; k++) { const uint8_t *q = FB[id[k]]; float xs[4], ys[4]; for (int i = 0; i < 4; i++) { xs[i] = sx[q[i]]; ys[i] = sy[q[i]]; }
+    float sh = shade(x, y, z, q[0], q[1], q[3]); sh = .6f + .8f * (sh - .5f); quad(xs, ys, C((int)(r * sh), (int)(g * sh), (int)(b * sh)));
+    uint16_t ec = C((int)(r * sh * .35f), (int)(g * sh * .35f), (int)(b * sh * .35f)); for (int i = 0; i < 4; i++) line((int)xs[i], (int)ys[i], (int)xs[(i + 1) & 3], (int)ys[(i + 1) & 3], ec); }
+}
 static void car(void) {
-  float cxm = 0; np = NC; curZ = -1;
-  for (int i = 0; i < NC; i++) { PX[i] = n[i].x; PY[i] = n[i].y; PZ[i] = n[i].z; cxm += n[i].x; } cxm /= NC;
-  int h0 = 20, h1 = 21;
-  if (oHood > .02f && pAtt[0] > 0) { h0 = rot(20, 23, 22, oHood * 1.05f, 0, cxm); h1 = rot(21, 23, 22, oHood * 1.05f, 0, cxm); }
-  int tg6 = 6, tg7 = 7;
-  if (oTrunk > .02f) { tg6 = rot(6, 10, 11, oTrunk * 1.2f, 0, cxm); tg7 = rot(7, 10, 11, oTrunk * 1.2f, 0, cxm); }
-  int dq[2][4];
-  for (int s = 0; s < 2; s++) {
-    int a = s ? 1 : 0, b = s ? 3 : 2, c1 = s ? 11 : 10, c2 = s ? 13 : 12;
-    int p0 = lerpn(a, b, .3f), p1 = lerpn(a, b, .65f), q1 = lerpn(c1, c2, .85f), q0 = lerpn(c1, c2, .1f);
-    float o = s ? .03f : -.03f; PX[p0] += o; PX[p1] += o; PX[q0] += o; PX[q1] += o;
-    if (oDoor > .02f) { int r0 = rot(p0, p1, q1, oDoor * 1.1f, 1, cxm), r1 = rot(q0, p1, q1, oDoor * 1.1f, 1, cxm); p0 = r0; q0 = r1; }
-    dq[s][0] = p0; dq[s][1] = p1; dq[s][2] = q1; dq[s][3] = q0;
-  }
-  uint8_t fa[22][4]; uint8_t kind[22]; int m = 0;
-#define F(k, a, b, c, d) do { fa[m][0] = a; fa[m][1] = b; fa[m][2] = c; fa[m][3] = d; kind[m++] = k; } while (0)
-  F(0, 0, 2, 8, 6); F(0, 1, 3, 9, 7); F(0, 0, 1, 7, 6); F(0, 2, 3, 9, 8); F(0, 0, 1, 3, 2); F(0, 10, 11, 13, 12);
-  F(1, 12, 13, 19, 18); F(1, 6, 10, 12, 18); F(1, 7, 11, 13, 19); F(1, tg6, tg7, 11, 10);
-  F(3, dq[0][0], dq[0][1], dq[0][2], dq[0][3]); F(3, dq[1][0], dq[1][1], dq[1][2], dq[1][3]);
-  if (pAtt[0] > 0 || 1) F(0, 23, 22, h1, h0);
-  F(4, 24, 25, 26, 27); F(4, 28, 29, 30, 31);
-  if (oHood > .1f || pAtt[0] <= 0) {
-    int cn[8] = {8, 9, 19, 18, 2, 3, lerpn(5, 3, .4f), lerpn(4, 2, .4f)};
-    float mx = 0, my = 0, mz = 0; for (int i = 0; i < 8; i++) { mx += PX[cn[i]] / 8; my += PY[cn[i]] / 8; mz += PZ[cn[i]] / 8; }
-    int e[8]; for (int i = 0; i < 8; i++) e[i] = vp(PX[cn[i]] + (mx - PX[cn[i]]) * .28f, PY[cn[i]] + (my - PY[cn[i]]) * .2f - (i < 4 ? .1f : 0), PZ[cn[i]] + (mz - PZ[cn[i]]) * .28f);
-    F(2, e[0], e[1], e[2], e[3]); F(2, e[0], e[1], e[5], e[4]); F(2, e[3], e[2], e[6], e[7]); F(2, e[0], e[3], e[7], e[4]); F(2, e[1], e[2], e[6], e[5]);
-  }
-  for (int i = 0; i < np; i++) {
-    float dx = PX[i] - camx, dz = PZ[i] - camz; zr[i] = dx * camhx + dz * camhz; if (zr[i] < .4f) zr[i] = .4f;
-    sxp[i] = CXc + (dx * camhz - dz * camhx) / zr[i] * FOC; syp[i] = HOR - (PY[i] - camy) / zr[i] * FOC;
-  }
+  float cxm = 0; np = NC; curZ = -1; blendA = 0;
+  if (!psgInit) { psgInit = 1; float cx = 0, cy = 0, cz = 0; for (int i = 0; i < 22; i++) { cx += P[i][0] / 22; cy += P[i][1] / 22; cz += P[i][2] / 22; }
+    for (int k = 0; k < NPAT; k++) { const float *a = P[PAT[k].n[0]], *b = P[PAT[k].n[1]], *d = P[PAT[k].n[3]], *e = P[PAT[k].n[2]];
+      float ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2], nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      float mx = (a[0] + b[0] + d[0] + e[0]) / 4 - cx, my = (a[1] + b[1] + d[1] + e[1]) / 4 - cy, mz = (a[2] + b[2] + d[2] + e[2]) / 4 - cz; psg[k] = (nx * mx + ny * my + nz * mz) >= 0 ? 1 : -1; } }
+  for (int i = 0; i < NC; i++) { PX[i] = n[i].x; PY[i] = n[i].y; PZ[i] = n[i].z; } for (int i = 0; i < 22; i++) cxm += n[i].x / 22;
+  // chassis frame: least-squares fit of the structure nodes against their rest coordinates
+  { float wx = 0, wy = 0, wz = 0, mx = 0, my = 0, mz = 0; int cnt = 0;
+    for (int i = 0; i < 22; i++) { if (i >= 14 && i < 18) continue; wx += PX[i]; wy += PY[i]; wz += PZ[i]; mx += P[i][0]; my += P[i][1]; mz += P[i][2]; cnt++; }
+    wx /= cnt; wy /= cnt; wz /= cnt; bxm = mx / cnt; bym = my / cnt; bzm = mz / cnt; float sxx = 0, syy = 0, szz = 0, dx[3] = {0, 0, 0}, dy[3] = {0, 0, 0}, dz[3] = {0, 0, 0};
+    for (int i = 0; i < 22; i++) { if (i >= 14 && i < 18) continue; float a = P[i][0] - bxm, b = P[i][1] - bym, c = P[i][2] - bzm, ex = PX[i] - wx, ey = PY[i] - wy, ez = PZ[i] - wz;
+      sxx += a * a; syy += b * b; szz += c * c; dx[0] += a * ex; dx[1] += a * ey; dx[2] += a * ez; dy[0] += b * ex; dy[1] += b * ey; dy[2] += b * ez; dz[0] += c * ex; dz[1] += c * ey; dz[2] += c * ez; }
+    for (int k = 0; k < 3; k++) { CFX[k] = dx[k] / sxx; CFY[k] = dy[k] / syy; CFZ[k] = dz[k] / szz; } CFO[0] = wx; CFO[1] = wy; CFO[2] = wz; }
+  int ri[64]; for (int i = 0; i < 60; i++) ri[i] = i;
+  float oh = oHood, ot = oTrunk, od = oDoor;
+  if (oh > .02f && pAtt[0] > 0) { ri[22] = rot(22, 25, 24, oh * 1.05f, 0, cxm); ri[23] = rot(23, 25, 24, oh * 1.05f, 0, cxm); }
+  if (ot > .02f && pAtt[3] > 0) { ri[34] = rot(34, 37, 36, ot * 1.2f, 0, cxm); ri[35] = rot(35, 37, 36, ot * 1.2f, 0, cxm); }
+  if (od > .02f && pAtt[4] > 0) { ri[38] = rot(38, 39, 40, od * 1.1f, 1, cxm); ri[41] = rot(41, 39, 40, od * 1.1f, 1, cxm); }
+  if (od > .02f && pAtt[5] > 0) { ri[42] = rot(42, 43, 44, od * 1.1f, 1, cxm); ri[45] = rot(45, 43, 44, od * 1.1f, 1, cxm); }
+  static Pat PL[NPAT]; for (int k = 0; k < NPAT; k++) { PL[k] = PAT[k]; for (int q = 0; q < 4; q++) PL[k].n[q] = ri[PAT[k].n[q]]; }
   if (structure) {
-    for (int i = 0; i < nbc; i++) if (bm[i].f != 2 && bm[i].o == 0 && bm[i].f != 3) {
-      float d = (bm[i].l0 - bm[i].lr) / bm[i].lr; d = (d < 0 ? -d : d) * 12; if (d > 1) d = 1;
-      line((int)sxp[bm[i].a], (int)syp[bm[i].a], (int)sxp[bm[i].b], (int)syp[bm[i].b], C(255, 255 - (int)(d * 230), 255 - (int)(d * 255)));
-    }
+    float dummy = 0; (void)dummy;
+    for (int i = 0; i < nbc; i++) if (bm[i].f != 2 && bm[i].o == 0 && bm[i].f != 3) { float d = (bm[i].l0 - bm[i].lr) / bm[i].lr; d = (d < 0 ? -d : d) * 12; if (d > 1) d = 1; float x0, y0, x1, y1;
+      if (proj(PX[bm[i].a], PY[bm[i].a], PZ[bm[i].a], &x0, &y0) && proj(PX[bm[i].b], PY[bm[i].b], PZ[bm[i].b], &x1, &y1)) line((int)x0, (int)y0, (int)x1, (int)y1, C(255, 255 - (int)(d * 230), 255 - (int)(d * 255))); }
+    float hx_, hz_; heading(&hx_, &hz_); for (int w = 14; w < 18; w++) { float ax = hz_, az = -hx_; wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(WHL[cw].cr, WHL[cw].cg, WHL[cw].cb)); }
+    return;
   }
-  int id[44]; float dp[44]; int k2 = 0;
-  for (int f = 0; f < m && !structure; f++) { id[k2] = f; dp[k2++] = (zr[fa[f][0]] + zr[fa[f][1]] + zr[fa[f][2]] + zr[fa[f][3]]) * .25f - (kind[f] == 3 ? .1f : 0) - (kind[f] == 2 ? .3f : 0); }
-  float hx_, hz_, ccx = 0, ccz = 0; heading(&hx_, &hz_); for (int i = 0; i < 20; i++) { ccx += n[i].x / 20; ccz += n[i].z / 20; }
+  float hx_, hz_, ccx = 0, ccz = 0; heading(&hx_, &hz_); for (int i = 0; i < 22; i++) { ccx += n[i].x / 22; ccz += n[i].z / 22; }
   float camSide = (camx - ccx) * hz_ - (camz - ccz) * hx_;
-  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; id[k2] = 100 + w; dp[k2++] = zr[w] + (sw * camSide > 0 ? -.6f : 1.5f); }
-  for (int i = 1; i < k2; i++) { int a = id[i]; float v = dp[i]; int j = i - 1; while (j >= 0 && dp[j] < v) { id[j + 1] = id[j]; dp[j + 1] = dp[j]; j--; } id[j + 1] = a; dp[j + 1] = v; }
-  const Veh *V = &VEH[cv]; const Eng *E = &ENG[ce]; const Whl *W = &WHL[cw];
-  for (int k = 0; k < k2; k++) {
-    if (id[k] >= 100) { int w = id[k] - 100; float ax = hz_, az = -hx_;
-      if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); }
-      wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); continue; }
-    int f = id[k]; float xs[4], ys[4]; const uint8_t *q = fa[f];
-    for (int i = 0; i < 4; i++) { xs[i] = sxp[q[i]]; ys[i] = syp[q[i]]; }
-    float sh = shade(PX, PY, PZ, q[0], q[1], q[3]), lit = (sh - .5f) * 2, dk = 1.f - dmg * .006f; uint16_t col;
-    if (kind[f] == 1) col = C((int)(120 * (.8f + .2f * lit)), (int)(170 * (.8f + .2f * lit)), 210);
-    else if (kind[f] == 2) col = C((int)(E->r * sh), (int)(E->g * sh), (int)(E->b * sh));
-    else if (kind[f] == 4) col = C((int)(75 * sh), (int)(75 * sh), (int)(80 * sh));
-    else { float d2 = kind[f] == 3 ? .85f : 1.f; col = C((int)(V->r * sh * dk * d2), (int)(V->g * sh * dk * d2), (int)(V->b * sh * dk * d2)); }
-    quad(xs, ys, col);
-  }
+  // facing of every patch (uses the open/closed positions)
+  uint8_t fc[NPAT]; float pd[NPAT];
+  for (int k = 0; k < NPAT; k++) { const Pat *p = &PL[k]; float c0[3] = {PX[p->n[0]], PY[p->n[0]], PZ[p->n[0]]};
+    float ax = PX[p->n[1]] - c0[0], ay = PY[p->n[1]] - c0[1], az = PZ[p->n[1]] - c0[2], bx = PX[p->n[3]] - c0[0], by = PY[p->n[3]] - c0[1], bz = PZ[p->n[3]] - c0[2];
+    float nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx, mx = (PX[p->n[0]] + PX[p->n[1]] + PX[p->n[2]] + PX[p->n[3]]) / 4, my = (PY[p->n[0]] + PY[p->n[1]] + PY[p->n[2]] + PY[p->n[3]]) / 4, mz = (PZ[p->n[0]] + PZ[p->n[1]] + PZ[p->n[2]] + PZ[p->n[3]]) / 4;
+    fc[k] = (nx * (camx - mx) + ny * (camy - my) + nz * (camz - mz)) * psg[k] > 0; pd[k] = (mx - camx) * camhx + (mz - camz) * camhz; }
+  // far-side glass first
+  for (int k = 0; k < NPAT; k++) if (!fc[k] && PL[k].cls == 0 && (PL[k].kind == K_WIN || PL[k].kind == K_DOOR)) drawpat(k, 3, 0, cxm);
+  // interior pass: inner walls, solids (seats, dashboard, trunk, engine bay, engine) and far-side wheels, far to near
+  int it[80]; float dp[80]; int ni = 0; int bayOpen = oh > .05f || pAtt[0] <= 0, trunkOpen = ot > .05f || pAtt[3] <= 0;
+  for (int k = 0; k < NPAT; k++) if (PL[k].cls == 1 && !fc[k]) { it[ni] = k; dp[ni++] = pd[k]; }
+  for (int b = 0; b < NBX; b++) { int cd = BXS[b].cond; if ((cd == 1 && !trunkOpen) || (cd == 2 && !bayOpen) || (cd == 3 && !(bayOpen || pAtt[7] <= 0)) || (cd == 4 && (ce != 3 || !(bayOpen || pAtt[7] <= 0)))) continue;
+    float x, y, z; fpt(BXS[b].fr, (BXS[b].a0 + BXS[b].a1) / 2, (BXS[b].b0 + BXS[b].b1) / 2, (BXS[b].c0 + BXS[b].c1) / 2, &x, &y, &z); it[ni] = 100 + b; dp[ni++] = (x - camx) * camhx + (z - camz) * camhz; }
+  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (sw * camSide > 0) continue; it[ni] = 200 + w; dp[ni++] = (n[w].x - camx) * camhx + (n[w].z - camz) * camhz; }
+  for (int i = 1; i < ni; i++) { int a = it[i]; float v = dp[i]; int j = i - 1; while (j >= 0 && dp[j] < v) { it[j + 1] = it[j]; dp[j + 1] = dp[j]; j--; } it[j + 1] = a; dp[j + 1] = v; }
+  const Whl *W = &WHL[cw];
+  for (int q = 0; q < ni; q++) { int a = it[q];
+    if (a >= 200) { int w = a - 200; float ax = hz_, az = -hx_; if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); } wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); }
+    else if (a >= 100) drawbx(a - 100); else drawpat(a, 2, 0, cxm); }
+  // opaque outer patches facing the camera (parts also show their inside when turned away)
+  int ok[NPAT], no = 0; float od2[NPAT];
+  for (int k = 0; k < NPAT; k++) if (PL[k].cls == 0 && (fc[k] || PL[k].two)) { ok[no] = k; od2[no++] = pd[k]; }
+  for (int i = 1; i < no; i++) { int a = ok[i]; float v = od2[i]; int j = i - 1; while (j >= 0 && od2[j] < v) { ok[j + 1] = ok[j]; od2[j + 1] = od2[j]; j--; } ok[j + 1] = a; od2[j + 1] = v; }
+  for (int q = 0; q < no; q++) drawpat(ok[q], 2, fc[ok[q]], cxm);
+  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (sw * camSide <= 0) continue; float ax = hz_, az = -hx_; if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); } wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); }
+  for (int q = 0; q < no; q++) { int k = ok[q]; if (fc[k] && (PL[k].kind == K_WIN || PL[k].kind == K_DOOR)) drawpat(k, 3, 1, cxm); }
 }
 // ---- boxes (objects, trailer)
 static void draw_box(int n0, int cr, int cg, int cb) {
@@ -211,10 +337,11 @@ static void draw_top(int cx0, int cy0, float S, int full) {
     int r = d < .5f ? 60 + (int)(d * 390) : 255, g = d < .5f ? 200 : 200 - (int)((d - .5f) * 380);
     line((int)TX(b->a), (int)TY(b->a), (int)TX(b->b), (int)TY(b->b), C(r, g, 50));
   }
-  for (int g = 0; g < 3; g++) {
-    int b0 = 20 + 4 * g; float u = 0, v = g == 0 ? 1.4f : (g == 1 ? 2.4f : -2.4f);
-    if (pAtt[g] > 0) { for (int i = 0; i < 4; i++) line((int)TX(b0 + i), (int)TY(b0 + i), (int)TX(b0 + ((i + 1) & 3)), (int)TY(b0 + ((i + 1) & 3)), C(230, 230, 235)); }
-    else { int x = (int)(cx0 + u * S), y = (int)(cy0 - v * S * gsz), r = full ? 6 : 3; line(x - r, y - r, x + r, y + r, C(255, 40, 40)); line(x - r, y + r, x + r, y - r, C(255, 40, 40)); }
+  static const float GU[NG] = {0, 0, 0, 0, -.95f, .95f, 0, .45f, -.45f, .45f}, GV[NG] = {1.5f, 2.4f, -2.4f, -1.65f, 0, 0, .85f, 1.4f, -.15f, -.15f};
+  for (int g = 0; g < NG; g++) {
+    int b0 = PB[g], cnt = PN[g];
+    if (pAtt[g] > 0) { if (cnt == 4 && g != 7) for (int i = 0; i < 4; i++) line((int)TX(b0 + i), (int)TY(b0 + i), (int)TX(b0 + ((i + 1) & 3)), (int)TY(b0 + ((i + 1) & 3)), C(230, 230, 235)); }
+    else { int x = (int)(cx0 + GU[g] * S * gsx), y = (int)(cy0 - GV[g] * S * gsz), r = full ? 5 : 2; line(x - r, y - r, x + r, y + r, C(255, 40, 40)); line(x - r, y + r, x + r, y - r, C(255, 40, 40)); }
   }
   for (int w = 0; w < 4; w++) {
     int i = 14 + w; float su = (w & 1 ? 1 : -1) * 1.1f * gsx, sv = (w >> 1 ? 1.3f : -1.3f) * gsz; int x = (int)(cx0 + su * S), y = (int)(cy0 - sv * S);
@@ -300,7 +427,7 @@ static void draw_garage(int sel, int gv) {
   const char *lab[11] = {"Vue (OK)", "Vehicule", "Roues", "Susp.", "Moteur", "Chassis", "Remorque", "Capot", "Portes", "Coffre", "JOUER"};
   const char *val[10] = {"", VEH[cv].nm, WHL[cw].nm, SUS[cs].nm, ENG[ce].nm, CHA[cc].nm, trl ? "oui" : "non", tHood > .5f ? "ouvert" : "ferme", tDoor > .5f ? "ouvertes" : "fermees", tTrunk > .5f ? "ouvert" : "ferme"};
   for (int i = 0; i < 11; i++) { char s[32], *p = s; p = cat(p, lab[i]); if (i > 0 && i < 10) { p = cat(p, ": "); cat(p, val[i]); } row(s, 4, 3 + i * 17, 152, 16, i == sel); }
-  if (gv) { txt("Fleches: tourner/hauteur", 4, 196, 0, C(255, 210, 80), C(15, 18, 28)); txt("OK ou Retour: fin", 4, 214, 0, C(255, 210, 80), C(15, 18, 28)); return; }
+  if (gv) { txt("Fleches: tourner/hauteur", 4, 190, 0, C(255, 210, 80), C(15, 18, 28)); txt("+ / - : zoom", 4, 205, 0, C(255, 210, 80), C(15, 18, 28)); txt("OK ou Retour: fin", 4, 220, 0, C(255, 210, 80), C(15, 18, 28)); return; }
   char s[32], *p = s; p = cat(p, "Puiss "); p = num(p, (int)(ENG[ce].a * VEH[cv].pw * 10)); p = cat(p, " Vmax "); num(p, (int)(ENG[ce].v * 3.6f));
   txt(s, 6, 196, 0, C(180, 190, 220), C(15, 18, 28));
   p = s; p = cat(p, "Grip "); p = num(p, (int)(WHL[cw].gr * VEH[cv].gr * 100)); p = cat(p, " Solid. "); num(p, (int)(CHA[cc].k / 140 * (solid == 0 ? 1.6f : (solid == 2 ? .65f : 1.f))));
@@ -346,11 +473,12 @@ static void draw_dmg(void) {
   int zp[5]; zones(zp); const char *zn[5] = {"Avant", "Arriere", "Gauche", "Droite", "Toit"};
   txt("DEGATS", 220, 6, 1, C(230, 60, 50), C(15, 18, 28));
   for (int i = 0; i < 5; i++) { char s[24], *p = s; p = cat(p, zn[i]); p = cat(p, ": "); p = num(p, zp[i]); cat(p, "%"); txt(s, 190, 36 + i * 17, 0, zp[i] > 60 ? C(255, 90, 80) : (zp[i] > 25 ? C(255, 210, 80) : C(120, 220, 120)), C(15, 18, 28)); }
-  char s[24], *p = s; p = cat(p, "Capot: "); cat(p, pAtt[0] > 0 ? "ok" : "arrache"); txt(s, 190, 128, 0, 0xFFFF, C(15, 18, 28));
-  p = s; p = cat(p, "Pare-ch.AV: "); cat(p, pAtt[1] > 0 ? "ok" : "perdu"); txt(s, 190, 145, 0, 0xFFFF, C(15, 18, 28));
-  p = s; p = cat(p, "Pare-ch.AR: "); cat(p, pAtt[2] > 0 ? "ok" : "perdu"); txt(s, 190, 162, 0, 0xFFFF, C(15, 18, 28));
-  int wl = 0; for (int w = 0; w < 4; w++) wl += wAtt[w] > 0; p = s; p = cat(p, "Roues: "); p = num(p, wl); cat(p, "/4"); txt(s, 190, 179, 0, 0xFFFF, C(15, 18, 28));
-  p = s; p = cat(p, "Total: "); p = num(p, (int)dmg); cat(p, "%"); txt(s, 190, 196, 0, C(255, 210, 80), C(15, 18, 28));
+  { char ln[28]; ln[0] = 0; char *p = ln; int y = 124, any = 0;
+    for (int g = 0; g < NG; g++) if (pAtt[g] <= 0) { any = 1; if ((p - ln) + (int)sizeof(PNAME[0]) > 0 && (p - ln) > 11) { txt(ln, 190, y, 0, C(255, 120, 100), C(15, 18, 28)); y += 14; p = ln; *p = 0; } p = cat(p, PNAME[g]); p = cat(p, " "); }
+    if (any) txt(ln, 190, y, 0, C(255, 120, 100), C(15, 18, 28)); else txt("Aucune piece perdue", 190, y, 0, C(120, 220, 120), C(15, 18, 28)); }
+  char s[24], *p = s;
+  int wl = 0; for (int w = 0; w < 4; w++) wl += wAtt[w] > 0; p = s; p = cat(p, "Roues: "); p = num(p, wl); cat(p, "/4"); txt(s, 190, 192, 0, 0xFFFF, C(15, 18, 28));
+  p = s; p = cat(p, "Total: "); p = num(p, (int)dmg); cat(p, "%"); txt(s, 190, 208, 0, C(255, 210, 80), C(15, 18, 28));
   if (mapId == 2 && ct == 2) { p = s; p = cat(p, "SCORE "); num(p, score); txt(s, 6, 226, 1, C(255, 210, 80), C(15, 18, 28)); txt("OK : rejouer", 190, 226, 0, 0xFFFF, C(15, 18, 28)); }
   else txt("Une touche pour revenir", 6, 226, 0, C(150, 160, 190), C(15, 18, 28));
 }
@@ -364,7 +492,7 @@ static void hud(int kmh, int gear, int lap, int ms, int best) {
 }
 int main(void) {
   int st = S_MENU, sel = 0, redraw = 1, gsel = 0, gview = 0, retS = S_MENU, cap = 0, fr = 0, lap = 1, best = 0, cp = 0;
-  float acc = 0, stw = 0, pz = 0, gorb = .6f, gelev = 3.4f, shx = 0, shz = 1, yawO = 0, hO = 0, dO = 0; uint64_t last = eadk_timing_millis(), lapT = last;
+  float acc = 0, stw = 0, pz = 0, gorb = .6f, gelev = 3.6f, gzoom = 7.5f, shx = 0, shz = 1, yawO = 0, hO = 0, dO = 0; uint64_t last = eadk_timing_millis(), lapT = last;
   for (int i = 0; i < NA; i++) bind[i] = BDEF[i];
 #ifdef TESTQ
   qual = TESTQ;
@@ -373,6 +501,9 @@ int main(void) {
 #ifdef TESTST
   st = TESTST; tHood = oHood = TESTO; tDoor = oDoor = TESTO; tTrunk = oTrunk = TESTO; cv = TESTV; ce = 3; cw = 1; trl = TESTT; mapId = TESTM; crashI = 3; gview = TESTGV;
   if (st == S_GARAGE) garage_car(); else startpos();
+#ifdef TESTGO
+  gorb = TESTGO; gelev = TESTGE; gzoom = TESTGZ;
+#endif
 #endif
   for (;;) {
     eadk_keyboard_state_t k = eadk_keyboard_scan();
@@ -390,6 +521,7 @@ int main(void) {
       if (redraw) { draw_garage(gsel, gview); redraw = 0; }
       if (gview) {                                       // free orbit with the arrow keys
         if (down(k, eadk_key_left)) gorb -= .05f; if (down(k, eadk_key_right)) gorb += .05f;
+        if (down(k, eadk_key_plus)) gzoom -= .1f; if (down(k, eadk_key_minus)) gzoom += .1f; if (gzoom < 3.5f) gzoom = 3.5f; if (gzoom > 14.f) gzoom = 14.f;
         if (down(k, eadk_key_up)) gelev += .1f; if (down(k, eadk_key_down)) gelev -= .1f; if (gelev > 9.f) gelev = 9.f; if (gelev < .3f) gelev = .3f;
         if (O || B) { gview = 0; redraw = 1; }
       } else {
@@ -405,7 +537,7 @@ int main(void) {
       }
       if (st == S_GARAGE) {
         oHood += (tHood - oHood) * .15f; oDoor += (tDoor - oDoor) * .15f; oTrunk += (tTrunk - oTrunk) * .15f;
-        float hx, hz, cx, cy, cz; frame(&hx, &hz, &cx, &cy, &cz); float dist = trl ? 14.f : 11.f;
+        float hx, hz, cx, cy, cz; frame(&hx, &hz, &cx, &cy, &cz); float dist = gzoom + (trl ? 3.5f : 0.f);
         camhx = fsin(gorb); camhz = fsin(gorb + 1.5708f); camx = cx - camhx * dist; camz = cz - camhz * dist; camy = cy + gelev; CXc = lw * 3 / 4;
         hor = (int)(lh * .66f - gelev * foc / dist);
         int sv = showTop; showTop = 0; scene(160); showTop = sv; present(160);
