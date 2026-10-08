@@ -283,43 +283,48 @@ static void drawbx(int bi) {
     float sh = shade(x, y, z, q[0], q[1], q[3]); sh = .6f + .8f * (sh - .5f); polyn(xs, ys, count, C((int)(r * sh), (int)(g * sh), (int)(b * sh)));
     uint16_t ec = C((int)(r * sh * .35f), (int)(g * sh * .35f), (int)(b * sh * .35f)); for (int i = 0; i < count; i++) line((int)xs[i], (int)ys[i], (int)xs[(i + 1) % count], (int)ys[(i + 1) % count], ec); }
 }
-static int localproj(float x, float y, float z, float *sx, float *sy) {
-  float wx, wy, wz; fpt(0, x, y, z, &wx, &wy, &wz); return proj(wx, wy, wz, sx, sy);
+// ---- foreground interface: drawn in screen space AFTER the whole 3D scene, so nothing in the bodywork can cover it
+static void frect(int x, int y, int w, int h, uint16_t c) { for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) px(x + i, y + j, c); }
+static const uint16_t GLYPH[11] = {0x7B6F, 0x2C97, 0x73E7, 0x73CF, 0x5BC9, 0x79CF, 0x79EF, 0x7249, 0x7BEF, 0x7BCF, 0x6BAD};   // 3x5 font: 0-9 and R
+static void glyph(int x, int y, int g, int sc, uint16_t c) {
+  for (int r = 0; r < 5; r++) for (int q = 0; q < 3; q++) if ((GLYPH[g] >> (14 - r * 3 - q)) & 1) frect(x + q * sc, y + r * sc, sc, sc, c);
 }
-static void line3(float x0, float y0, float z0, float x1, float y1, float z1, uint16_t col) {
-  float sx0, sy0, sx1, sy1; if (localproj(x0, y0, z0, &sx0, &sy0) && localproj(x1, y1, z1, &sx1, &sy1)) line((int)sx0, (int)sy0, (int)sx1, (int)sy1, col);
+static void ring2(int cx, int cy, int r, int thick, uint16_t c) {
+  int ox = cx + r, oy = cy;
+  for (int i = 1; i <= 24; i++) { float th = i * .2617994f; int x = cx + (int)(r * fsin(th + 1.5708f)), y = cy - (int)(r * fsin(th));
+    for (int t = 0; t < thick; t++) { line(ox, oy + t, x, y + t, c); } ox = x; oy = y; }
 }
-static void ring3(float x, float y, float z, float r, uint16_t col) {
-  float sx0, sy0; int was = localproj(x + r, y, z, &sx0, &sy0);
-  for (int i = 1; i <= 16; i++) { float th = i * .3926991f, px1 = x + r * fsin(th + 1.5708f), py1 = y + r * fsin(th), sx1, sy1; int valid = localproj(px1, py1, z, &sx1, &sy1);
-    if (was && valid) line((int)sx0, (int)sy0, (int)sx1, (int)sy1, col);
-    if (valid) { sx0 = sx1; sy0 = sy1; } was = valid;
+static void gauge(int cx, int cy, int r, float value, uint16_t needle, int gear) {
+  disc(cx, cy, r, C(10, 14, 18)); ring2(cx, cy, r, 1, C(150, 160, 165));
+  if (value < 0) value = 0; if (value > 1) value = 1;
+  for (int i = 0; i <= 6; i++) { float th = 3.927f - i * .7854f, c = fsin(th + 1.5708f), s = fsin(th);
+    line(cx + (int)(r * .72f * c), cy - (int)(r * .72f * s), cx + (int)(r * .95f * c), cy - (int)(r * .95f * s), i >= 5 ? C(230, 70, 55) : C(185, 195, 195)); }
+  if (gear >= 0) glyph(cx - 1, cy + 1, gear > 9 ? 0 : gear, 1, C(120, 130, 135));
+  float th = 3.927f - value * 4.712f; line(cx, cy, cx + (int)(r * .86f * fsin(th + 1.5708f)), cy - (int)(r * .86f * fsin(th)), needle);
+  disc(cx, cy, 1, C(220, 220, 225));
+}
+static void draw_overlay(float kmh, int gear) {
+  curZ = -1; blendA = 0;
+  int sp = (int)(kmh + .5f), sc = lw >= 150 ? 2 : 1, g = gear < 0 ? 10 : gear;
+  float rpm = engineRpm / 7000.f;
+  if (camInterior) {                                          // dashboard, steering wheel and gauges, always on top
+    int bandY = lh - lh / 5, R = lw * 15 / 100, wx = lw * 40 / 100, wy = lh - R / 3, gr = lh * 8 / 100 + 1;
+    frect(0, bandY, lw, lh - bandY, C(26, 30, 36)); frect(0, bandY, lw, 1, C(95, 105, 112));
+    gauge(lw * 62 / 100, lh - gr - 2, gr, rpm, C(245, 80, 55), -1);
+    gauge(lw * 80 / 100, lh - gr - 2, gr, kmh / (engV * 3.6f * (turbo ? 1.5f : 1.f) + 1.f), C(240, 205, 85), g);
+    float a = steer * 2.6f;                                   // the wheel turns with the front wheels
+    ring2(wx, wy, R, 3, C(58, 62, 70)); ring2(wx, wy, R + 1, 1, C(150, 158, 165)); ring2(wx, wy, R - 2, 1, C(20, 22, 26));
+    for (int k = 0; k < 3; k++) { float th = a + 1.5708f * (k == 0 ? 2 : (k == 1 ? 0 : -1)); int x = wx + (int)((R - 2) * fsin(th + 1.5708f)), y = wy - (int)((R - 2) * fsin(th));
+      line(wx, wy, x, y, C(58, 62, 70)); line(wx, wy + 1, x, y + 1, C(58, 62, 70)); }
+    disc(wx, wy, R / 5 + 1, C(95, 102, 110));   // hub
+    return;
   }
-}
-static void dial3(float x, float y, float z, float r, float value, uint16_t needle) {
-  float sx, sy, wx, wy, wz; fpt(0, x, y, z, &wx, &wy, &wz); if (!proj(wx, wy, wz, &sx, &sy)) return;
-  float d = (wx - camx) * camhx + (wz - camz) * camhz; int rr = (int)(r * FOC / d * .72f); if (rr < 2) rr = 2; if (rr > 12) rr = 12;
-  disc((int)sx, (int)sy, rr, C(14, 20, 25)); ring3(x, y, z, r, C(145, 155, 160));
-  for (int i = 0; i <= 5; i++) { float th = 3.75f + i * .47f, c = fsin(th + 1.5708f), sn = fsin(th); line3(x + r * .68f * c, y + r * .68f * sn, z, x + r * c, y + r * sn, z, C(180, 190, 190)); }
-  if (value < 0) value = 0;
-  if (value > 1) value = 1;
-  float th = 3.75f + value * 2.35f;
-  line3(x, y, z - .003f, x + r * .68f * fsin(th + 1.5708f), y + r * .68f * fsin(th), z - .003f, needle);
-}
-static void draw_cockpit(void) {
-  float hx, hz, speed = 0; heading(&hx, &hz); for (int i = 0; i < 20; i++) speed += (n[i].vx * hx + n[i].vz * hz) / 20.f; if (speed < 0) speed = -speed;
-  uint16_t trim = C(34, 40, 45), metal = C(115, 125, 130);
-  line3(-.78f, 1.02f, .82f, .78f, 1.02f, .82f, trim);
-  line3(-.78f, 1.02f, .82f, -.78f, 1.12f, .78f, metal); line3(.78f, 1.02f, .82f, .78f, 1.12f, .78f, metal);
-  for (int v = 0; v < 3; v++) line3(.10f, 1.04f + v * .025f, .84f, .30f, 1.04f + v * .025f, .84f, C(85, 95, 100));
-  ring3(-.43f, 1.13f, .58f, .075f, C(22, 25, 28));
-  line3(-.43f, 1.13f, .58f, -.43f, 1.20f, .58f, metal);
-  line3(-.43f, 1.13f, .58f, -.49f, 1.09f, .58f, metal); line3(-.43f, 1.13f, .58f, -.37f, 1.09f, .58f, metal);
-  dial3(-.22f, 1.17f, .82f, .052f, engineRpm / 6500.f, C(245, 80, 55));
-  dial3(-.06f, 1.17f, .82f, .052f, speed / (engV + .01f), C(240, 205, 85));
-  line3(.40f, 1.09f, .84f, .72f, 1.09f, .84f, metal); line3(.72f, 1.09f, .84f, .72f, 1.25f, .84f, metal);
-  line3(.72f, 1.25f, .84f, .40f, 1.25f, .84f, metal); line3(.40f, 1.25f, .84f, .40f, 1.09f, .84f, metal);
-  line3(.44f, 1.13f, .835f, .67f, 1.13f, .835f, C(60, 170, 150)); line3(.44f, 1.17f, .835f, .62f, 1.17f, .835f, C(60, 170, 150));
+  int W = 17 * sc + 6, H = 5 * sc + 11, x0 = lw - W - 3, y0 = lh - H - 3;   // chase view: compact speed / rpm / gear block
+  frect(x0, y0, W, H, C(10, 12, 18)); frect(x0, y0, W, 1, C(70, 78, 90));
+  int bw = W - 6, fill = (int)(bw * (rpm > 1.f ? 1.f : rpm)); frect(x0 + 3, y0 + 3, bw, 2, C(40, 44, 52)); frect(x0 + 3, y0 + 3, fill, 2, rpm > .83f ? C(235, 70, 55) : C(80, 210, 120));
+  int d[3] = {sp / 100 % 10, sp / 10 % 10, sp % 10}, started = 0;
+  for (int i = 0; i < 3; i++) { if (d[i] || started || i == 2) { started = 1; glyph(x0 + 3 + i * 4 * sc, y0 + 7, d[i], sc, 0xFFFF); } }
+  glyph(x0 + 3 + 14 * sc, y0 + 7, g, sc, g == 10 ? C(255, 130, 90) : C(240, 205, 85));
 }
 static void car(void) {
   float cxm = 0, czm = 0; np = NC; curZ = -1; blendA = 0;
@@ -370,7 +375,6 @@ static void car(void) {
   for (int q = 0; q < ni; q++) { int a = it[q];
     if (a >= 200) { int w = a - 200; float ax = hz_, az = -hx_; if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); } wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); }
     else if (a >= 100) drawbx(a - 100); else drawpat(a, &PL[a], 2, 0, cxm); }
-  if (camInterior) draw_cockpit();
   // opaque outer patches facing the camera (parts also show their inside when turned away)
   int ok[NPAT], no = 0; float od2[NPAT];
   for (int k = 0; k < NPAT; k++) if (PL[k].cls == 0 && (fc[k] || PL[k].two)) { ok[no] = k; od2[no++] = pd[k]; }
@@ -642,7 +646,7 @@ static void scene(int xd0) {
     uint16_t streak = weatherMode == 1 ? C(155, 190, 210) : C(205, 218, 220);
     for (int i = 0; i < 14; i++) { int x = (i * 37 + (int)(signalClock * 45.f)) % (lw - 3) + 2, y = (i * 29 + (int)(signalClock * 71.f)) % (lh - 5); line(x, y, x - 2, y + 5, streak); }
   }
-  if (showTop && xd0 == 0) { int bw = lw / 4, bh = lh * 40 / 112; for (int y = lh - bh; y < lh; y++) for (int x = 0; x < bw; x++) fb[y * lw + x] = C(18, 20, 30); draw_top(bw / 2, lh - bh / 2, 6.5f * lw / 160, 0); }
+  if (showTop && xd0 == 0 && !camInterior) { int bw = lw / 4, bh = lh * 40 / 112; for (int y = lh - bh; y < lh; y++) for (int x = 0; x < bw; x++) fb[y * lw + x] = C(18, 20, 30); draw_top(bw / 2, lh - bh / 2, 6.5f * lw / 160, 0); }
 }
 // ---- settings, controls
 enum { A_ACC, A_BRK, A_LEFT, A_RIGHT, A_RESET, A_HOOD, A_DOORS, A_TRUNK, A_ALL, A_BEAMS, A_TOP, A_DMG, A_CL, A_CR, A_CU, A_CD, A_ZI, A_ZO, A_CRESET, A_QUICK, A_TURBO, A_CINT, A_SKIP, NA };
@@ -764,7 +768,7 @@ static void draw_quick(int sel) {
   eadk_display_push_rect_uniform((eadk_rect_t){40, 0, 240, 240}, C(15, 18, 28)); txt("OPTIONS RAPIDES", 108, 3, 0, C(255, 210, 80), C(15, 18, 28));
   int top = sel - 5; if (top < 0) top = 0; if (top > QUICK_COUNT - 12) top = QUICK_COUNT - 12;
   for (int line = 0; line < 12; line++) { int i = top + line; char s[40], *p = s; p = cat(p, QL[i]);
-    if (i == 1) cat(p, turboT ? ": oui" : ": non"); else if (i == 3) { p = cat(p, ": "); cat(p, VEH[cv].nm); } else if (i == 4) { p = cat(p, ": "); cat(p, ENG[ce].nm); }
+    if (i == 1) cat(p, turboT ? ": oui" : ": non"); else if (i == 10 && mapId != 3) cat(p, trafficEnabled ? ": oui (Ville)" : ": non (Ville)"); else if (i == 3) { p = cat(p, ": "); cat(p, VEH[cv].nm); } else if (i == 4) { p = cat(p, ": "); cat(p, ENG[ce].nm); }
     else if (i == 5) cat(p, trl ? ": oui" : ": non"); else if (i == 6) { p = cat(p, ": "); cat(p, RN[ri]); } else if (i == 7) { p = cat(p, ": "); cat(p, GN[gi]); } else if (i == 8) cat(p, tscale < .5f ? ": ralenti" : ": normal");
     else if (i == 10) cat(p, trafficEnabled ? ": oui" : ": non"); else if (i == 11) { p = cat(p, ": "); p = num(p, trafficCount); cat(p, "/64"); }
     else if (i == 12) { p = cat(p, ": "); cat(p, AI_MODE[trafficBehavior]); } else if (i == 13) { p = cat(p, ": "); cat(p, AI_SPEED[trafficSpeed]); }
@@ -922,7 +926,7 @@ int main(void) {
       else { camx = cx - camhx * dist; camz = cz - camhz * dist;
         float gy = gh(camx, camz) + 1.4f, ty = cy + 2.6f + hO; if (ty < gy) ty = gy; camy += (ty - camy) * .15f; }
       hor = (int)(lh * (camInterior ? .42f : .72f) - (camy - cy) * foc / dist);
-      scene(0); present(0);
+      scene(0); draw_overlay(sp * 3.6f, vf < -.5f ? -1 : gearNow); present(0);
       if (++fr % 6 == 0) hud((int)(sp * 3.6f), vf < -.5f ? -1 : gearNow, lap, (int)(now - lapT), best);
       if (tutOn) draw_tutorial();
     } else if (st == S_DMG) {

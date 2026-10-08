@@ -12,8 +12,7 @@ typedef struct { uint8_t a, b, f, t0, o, g; float l0, lr, k, c, yl, bk; } Beam; 
 static Node n[NMAX]; static Beam bm[MB];
 static int nn, nb, nbody, nbc, ntr = -1, nob0, nobj, pAtt[NG], pAtt0[NG], wAtt[4], trl, solid = 1, mapId;
 typedef struct { float x, z, phase, speed, hx, hz; } TrafficCar;
-static TrafficCar traffic[MAX_AI]; static int trafficEnabled, trafficCount = 2, trafficBehavior, trafficSpeed = 2;
-static TrafficCar policeCar; static int pursuitEnabled, cityPlan, weatherMode;
+static TrafficCar traffic[MAX_AI]; static int trafficEnabled = 1, trafficCount = 6, trafficBehavior, trafficSpeed = 2;
 static TrafficCar policeCar; static int pursuitEnabled, cityPlan, weatherMode;
 static float tunePower = 1.f, tuneGrip = 1.f, tuneSusp = 1.f, tuneBrake = 1.f, signalClock;
 static const uint8_t PB[NG] = {22, 26, 30, 34, 38, 42, 46, 50, 54, 57}, PN[NG] = {4, 4, 4, 4, 4, 4, 4, 4, 3, 3};   // hood, front bumper, rear bumper, trunk lid, doors L/R, windshield, engine, seats L/R
@@ -102,6 +101,16 @@ static void city_nearest(float x, float z, int *ix, int *iz) {
     if (d < best) { best = d; *ix = a; *iz = b; }
   }
 }
+static int city_push_out(float *x, float *z, float r) {   // projects a ground point out of every building footprint
+  int ix0, iz0, moved = 0; city_nearest(*x, *z, &ix0, &iz0);
+  for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) for (int iz = iz0 - 1; iz <= iz0 + 1; iz++) {
+    float bx, bz; city_center(ix, iz, &bx, &bz);
+    float dx = *x - bx, dz = *z - bz, px = 8.5f + r - (dx < 0 ? -dx : dx), pz = 11.f + r - (dz < 0 ? -dz : dz);
+    if (px <= 0 || pz <= 0) continue; moved = 1;
+    if (px < pz) *x = bx + (dx >= 0 ? 8.5f + r : -(8.5f + r)); else *z = bz + (dz >= 0 ? 11.f + r : -(11.f + r));
+  }
+  return moved;
+}
 static float gh(float x, float z) {
   float h, ft = 0, ax = x < 0 ? -x : x;
   if (mapId == 3) { gdist = ax; gfeat = 0; return 0; }
@@ -127,7 +136,7 @@ static void heading(float *hx, float *hz);
 static void traffic_update(float dt);
 static void traffic_reset(void) {
   static const float SPEED[5] = {4.5f, 7.f, 9.f, 12.f, 15.f};
-  for (int i = 0; i < MAX_AI; i++) { traffic[i].phase = i * (200.f / (trafficCount > 0 ? trafficCount : 1)); traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; }
+  for (int i = 0; i < MAX_AI; i++) { traffic[i].phase = i * ((trafficBehavior == 2 ? 114.f : 242.f) / (trafficCount > 0 ? trafficCount : 1)); traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; }
   policeCar.x = (n[4].x + n[5].x) * .5f; policeCar.z = (n[4].z + n[5].z) * .5f - 12.f; policeCar.hx = 0; policeCar.hz = 1;
   traffic_update(0.f);
 }
@@ -144,25 +153,25 @@ static void traffic_update(float dt) {
       float blend = dt <= 0 ? 1.f : dt * 1.8f; if (blend > .12f) blend = .12f;
       car->x += (tx - car->x) * blend; car->z += (tz - car->z) * blend; car->hx = hx; car->hz = hz; continue;
     }
-    float loop = trafficBehavior == 2 ? 148.f : 408.f;
+    float x0, x1, z0, z1;                                   // lane rectangle, inset from the road centre lines
+    if (trafficBehavior == 2) { x0 = -26.3f; x1 = -1.7f; z0 = 1.7f; z1 = 34.3f; }       // patrol: block around the start
+    else { x0 = -26.3f; x1 = 26.3f; z0 = -34.3f; z1 = 34.3f; }                          // circuit: inner ring road
+    float W = x1 - x0, Hh = z1 - z0, loop = 2.f * (W + Hh);
     car->phase += car->speed * (trafficBehavior == 2 ? .7f : 1.f) * dt; while (car->phase >= loop) car->phase -= loop;
     float p = car->phase;
-    if (trafficBehavior == 2) {
-      if (p < 60.f) { car->x = -7.f; car->z = -30.f + p; car->hx = 0; car->hz = 1; }
-      else if (p < 74.f) { car->x = -7.f + p - 60.f; car->z = 30.f; car->hx = 1; car->hz = 0; }
-      else if (p < 134.f) { car->x = 7.f; car->z = 30.f - (p - 74.f); car->hx = 0; car->hz = -1; }
-      else { car->x = 7.f - (p - 134.f); car->z = -30.f; car->hx = -1; car->hz = 0; }
-    } else if (p < 120.f) { car->x = -42.f; car->z = -60.f + p; car->hx = 0; car->hz = 1; }
-    else if (p < 204.f) { car->x = -42.f + p - 120.f; car->z = 60.f; car->hx = 1; car->hz = 0; }
-    else if (p < 324.f) { car->x = 42.f; car->z = 60.f - (p - 204.f); car->hx = 0; car->hz = -1; }
-    else { car->x = 42.f - (p - 324.f); car->z = -60.f; car->hx = -1; car->hz = 0; }
+    if (p < Hh) { car->x = x0; car->z = z0 + p; car->hx = 0; car->hz = 1; }
+    else if (p < Hh + W) { car->x = x0 + p - Hh; car->z = z1; car->hx = 1; car->hz = 0; }
+    else if (p < 2.f * Hh + W) { car->x = x1; car->z = z1 - (p - Hh - W); car->hx = 0; car->hz = -1; }
+    else { car->x = x1 - (p - 2.f * Hh - W); car->z = z0; car->hx = -1; car->hz = 0; }
   }
+  for (int i = 0; i < trafficCount && trafficEnabled; i++) city_push_out(&traffic[i].x, &traffic[i].z, 1.2f);   // other city plans move the buildings
   if (pursuitEnabled) {
     float dx = px - policeCar.x, dz = pz - policeCar.z, distance = fsqrt(dx * dx + dz * dz) + .001f;
     float tx = dx / distance, tz = dz / distance, rate = (dt <= 0.f) ? 1.f : dt * 1.6f; if (rate > .08f) rate = .08f;
     policeCar.hx += (tx - policeCar.hx) * rate; policeCar.hz += (tz - policeCar.hz) * rate;
     float len = fsqrt(policeCar.hx * policeCar.hx + policeCar.hz * policeCar.hz) + .001f; policeCar.hx /= len; policeCar.hz /= len;
     float speed = distance > 8.f ? 11.f : 5.f; policeCar.x += policeCar.hx * speed * dt; policeCar.z += policeCar.hz * speed * dt;
+    city_push_out(&policeCar.x, &policeCar.z, 1.4f);
     if (policeCar.x < -CITY_X_LIMIT + 3.f) policeCar.x = -CITY_X_LIMIT + 3.f; if (policeCar.x > CITY_X_LIMIT - 3.f) policeCar.x = CITY_X_LIMIT - 3.f;
     if (policeCar.z < -CITY_Z_LIMIT + 3.f) policeCar.z = -CITY_Z_LIMIT + 3.f; if (policeCar.z > CITY_Z_LIMIT - 3.f) policeCar.z = CITY_Z_LIMIT - 3.f;
   }
@@ -199,6 +208,7 @@ static void spawn_objects(void) {
 }
 static void car_init(float x0, float z0, float hx, float hz, float lift, int objs) {
   const Veh *V = &VEH[cv]; const Whl *W = &WHL[cw]; const Sus *S = &SUS[cs]; const Cha *H = &CHA[cc]; float SF = SOLF[solid];
+  if (mapId == 3) city_push_out(&x0, &z0, 3.2f);          // never spawn inside a building
   float rx = hz, rz = -hx, oy = gh(x0, z0) + lift;
   engA = ENG[ce].a * V->pw * tunePower; engV = ENG[ce].v; gearNow = 1; engineRpm = 900.f; engineOutput = .45f; latG = W->gr * V->gr * tuneGrip; if (latG > .45f) latG = .45f; gsx = V->sx; gsz = V->sz;
   for (int i = 0; i < NC; i++) {
@@ -372,14 +382,21 @@ static void step(float dt) {
       if (p->y - p->r >= height) continue;
       float px = 8.5f + p->r - (p->x > bx ? p->x - bx : bx - p->x), pz = 11.f + p->r - (p->z > bz ? p->z - bz : bz - p->z);
       if (px <= 0 || pz <= 0) continue;
+      // soft contact: the node is pushed out a few centimetres per step (never teleported), so the beams
+      // never see a sudden stretch. Axis choice has hysteresis-free min-penetration but the push is capped.
+      float vn, push;
       if (px < pz) {
-        float sign = p->x >= bx ? 1.f : -1.f; p->x = bx + sign * (8.5f + p->r);
-        float vn = p->vx * sign; if (vn < 0) p->vx -= vn * 1.2f; p->vz *= .88f;
+        float sign = p->x >= bx ? 1.f : -1.f; push = px < .025f ? px : .025f; p->x += sign * push;
+        vn = p->vx * sign; if (vn < 0) p->vx -= vn * sign * 1.1f; p->vz *= .97f;   // normal is (sign,0): the impulse must carry the sign
       } else {
-        float sign = p->z >= bz ? 1.f : -1.f; p->z = bz + sign * (11.f + p->r);
-        float vn = p->vz * sign; if (vn < 0) p->vz -= vn * 1.2f; p->vx *= .88f;
+        float sign = p->z >= bz ? 1.f : -1.f; push = pz < .025f ? pz : .025f; p->z += sign * push;
+        vn = p->vz * sign; if (vn < 0) p->vz -= vn * sign * 1.1f; p->vx *= .97f;
       }
     }
+  }
+  for (int i = 0; i < nn; i++) {                         // safety net: a node can never leave the physically possible range
+    Node *p = &n[i]; float v2 = p->vx * p->vx + p->vy * p->vy + p->vz * p->vz;
+    if (!(v2 == v2) || v2 > 90.f * 90.f) { float k = v2 == v2 ? 90.f / fsqrt(v2) : 0.f; p->vx *= k; p->vy *= k; p->vz *= k; if (!(p->x == p->x) || !(p->y == p->y) || !(p->z == p->z)) { p->x = n[4].x; p->y = n[4].y + 1.f; p->z = n[4].z; } }
   }
   if (thrustAcc != 0) for (int i = 0; i < NC; i++) { n[i].vx += hx * thrustAcc; n[i].vz += hz * thrustAcc; }
   if (latX != 0 || latY != 0 || latZ != 0) {
