@@ -2,11 +2,13 @@
 // Car nodes 0-19 structure, 20-23 hood, 24-27 front bumper, 28-31 rear bumper; then trailer (11), then objects (8 nodes each).
 #include <stdint.h>
 #define NC 60
-#define NMAX 124
-#define MB 500
+#define NMAX 172
+#define MB 700
 #define NG 10
 #define MAX_AI 64
 static float G = 14.f, gripF = 1.f; static int turbo;
+static int optSkid = 1, optPart = 1, optObj = 1, optRamp = 1, optPunct = 1;   // settings: tyre marks, particles, objects, ramps/loops, punctures
+static int manualGear, clutchAssist = 1; static float engBrake = 1.f, clutchKey, hbrake, freeRpm = 900.f, shiftT, stallT;   // clutchAssist: 1 = shifts cut power briefly, no grinding / stalling   // manualGear: 0 = auto, 1 = manual gearbox (player only)
 typedef struct { float x, y, z, vx, vy, vz, im, r, rc; uint8_t gnd, t; } Node;   // t: 0 body, 1 car wheel, 2 trailer wheel
 typedef struct { uint8_t a, b, f, t0, o, g; float l0, lr, k, c, yl, bk; } Beam;  // f: 0 body 1 susp 2 broken 3 hitch 4 panel attach; o: 0 car 1 trailer 2 object
 static Node nPl[NMAX]; static Beam bmPl[MB]; static Node *n = nPl; static Beam *bm = bmPl;   // active vehicle: the player's by default, bots swap these pointers
@@ -20,16 +22,29 @@ static const uint8_t PB[NG] = {22, 26, 30, 34, 38, 42, 46, 50, 54, 57}, PN[NG] =
 static const char *PNAME[NG] = {"Capot", "Pare-ch.AV", "Pare-ch.AR", "Coffre", "Porte G", "Porte D", "Pare-brise", "Moteur", "Siege G", "Siege D"};
 static float thr, brk, steer, dmg, gfeat, gdist, engA = 10, engV = 38, engineRpm = 900, engineOutput = .45f, latG = .25f, gsx = 1, gsz = 1;
 static int gearNow = 1;
+static float gbumpF;   // 1 when the ground point just sampled by gh() is on a speed bump (used for the yellow/black stripes)
 // ---- vehicle systems: radiator (front), fuel tank (rear), driveshaft (underbody). Pierced tank => leak, fire or explosion.
 static float fuel = 1.f, coolant = 1.f, engTemp = .3f, radHp = 1.f, tankHp = 1.f, shaftHp = 1.f, driveEff = 1.f;
 static float fireI, fireT, boomAt = 1e9f, boomT = 99.f, flashT, jolt, vcmx, vcmz, steamI, fxClock;
 static int burning, exploded, fxPrimed; static unsigned fxSeed = 777u;
+static int abFront, abSideL, abSideR, abBang, beltOn = 1, airbagsOn = 1; static float abT = 99.f, occRisk;   // airbags / seat belt / occupant injury risk (player car only)
 static float fx_rand(void) { fxSeed = fxSeed * 1664525u + 1013904223u; return (fxSeed >> 8) / 16777215.f; }
 static void fx_reset(void) {
   fuel = 1.f; coolant = 1.f; engTemp = .3f; radHp = tankHp = shaftHp = driveEff = 1.f; fireI = fireT = 0.f; boomAt = 1e9f; boomT = 99.f;
   flashT = 0.f; jolt = vcmx = vcmz = steamI = 0.f; burning = exploded = fxPrimed = 0;
+  if (n == nPl) { abFront = abSideL = abSideR = abBang = 0; abT = 99.f; occRisk = 0.f; shiftT = stallT = 0.f; }
 }
 static const float SOLF[3] = {1.6f, 1.f, .65f};
+// ---- punctures: a hard landing can burst a tyre; it then deflates, the wheel sinks, grip and drive drop, rolling drag rises
+static float tirePres[4] = {1.f, 1.f, 1.f, 1.f}, tireR0[4] = {.36f, .36f, .36f, .36f}; static uint8_t tpLeak[4]; static int tpOn = 1;   // tpOn = 0 while a bot is simulated
+static void tires_update(float dt) {                 // once per frame, player car
+  if (dt <= 0.f) return; if (dt > .1f) dt = .1f;
+  if (!optPunct) for (int w = 0; w < 4; w++) { tpLeak[w] = 0; tirePres[w] = 1.f; }   // punctures disabled: tyres are mended
+  for (int w = 0; w < 4; w++) {
+    if (tpLeak[w] && tirePres[w] > .15f) { tirePres[w] -= dt * .12f; if (tirePres[w] < .15f) tirePres[w] = .15f; }
+    if (wAtt[w] > 0) n[14 + w].r = tireR0[w] * (.58f + .42f * tirePres[w]);
+  }
+}
 typedef struct { const char *nm; float sx, sy, sz, im, pw, gr; uint8_t r, g, b; float th; } Veh;
 #define NV 16   // 0-3 de base, 4 = généré, 5+ = modèles ajoutés (VEH[NV] reste réservé au bot actif)
 static char genName[16] = "Gen #1";
@@ -75,9 +90,12 @@ typedef struct { const char *nm; float k, yl, bk, im; } Cha;
 static const Cha CHA[3] = {{"Acier",14000,.08f,.6f,1.f},{"Renforce",20000,.12f,.9f,.8f},{"Leger",9000,.05f,.45f,1.25f}};
 // objects: size, node inverse mass, stiffness, yield, break, car-collision radius, colour
 typedef struct { const char *nm; float sx, sy, sz, im, k, yl, bk, rc; uint8_t r, g, b; } Obj;
-static const Obj OBJ[4] = {{"Cone",.5f,.8f,.5f,4.f,1500,.25f,1.5f,.4f,240,110,20},{"Caisse bois",1,1,1,1.6f,5000,.06f,.35f,.6f,170,120,60},
-  {"Caisse acier",1,1,1,.9f,12000,.12f,.8f,.6f,110,130,160},{"Plot beton",1.2f,.9f,.6f,.25f,20000,.2f,1.2f,.5f,185,185,180}};
-static uint8_t okind[6];
+static const Obj OBJ[7] = {{"Cone",.5f,.8f,.5f,4.f,1500,.25f,1.5f,.4f,240,110,20},{"Caisse bois",1,1,1,1.6f,5000,.06f,.35f,.6f,170,120,60},
+  {"Caisse acier",1,1,1,.9f,12000,.12f,.8f,.6f,110,130,160},{"Plot beton",1.2f,.9f,.6f,.25f,20000,.2f,1.2f,.5f,185,185,180},
+  {"Baril",.6f,.95f,.6f,1.2f,9000,.1f,.45f,.45f,205,40,35},          // 4: explosive barrel
+  {"Pneus",1.3f,1.f,1.f,.5f,2500,.45f,2.f,.65f,28,28,32},            // 5: tyre stack (3 side by side = a wall)
+  {"Pylone",.35f,6.f,.35f,.8f,20000,.15f,.9f,.4f,185,190,195}};      // 6: tall pylon, falls when hit
+static uint8_t okind[12], objDead[12]; static int blastN; static float blastP[4][3];   // blast events are consumed by the renderer
 static int cv, cw, cs = 1, ce = 1, cc;
 static const float P[NC][3] = {
   {-.9,.35,-2},{.9,.35,-2},{-.9,.35,2},{.9,.35,2},{-.9,.35,0},{.9,.35,0},
@@ -105,6 +123,36 @@ static float fsin(float x) {
 static float fsqrt(float v) { return __builtin_sqrtf(v); }
 static float bump(float x, float c, float wl, float wr, float h) {
   float t = x < c ? (c - x) / wl : (x - c) / wr; if (t >= 1.f) return 0; t = 1.f - t * t; return h * t * t;
+}
+// ---- empty map (4): ramps, jumps and vertical loops
+typedef struct { float cx, hw, z0, z1, h0, h1; } Rmp;      // slope along z between z0 and z1 (height h0 -> h1), width +-hw around x = cx
+static const Rmp RMP[] = {
+  {0, 3.5f, 34, 48, 0, 2.2f}, {0, 3.5f, 66, 82, 2.f, 0},                                  // jump 1: kicker + landing ramp
+  {-22, 4.f, 30, 50, 0, 4.5f}, {-22, 4.f, 80, 104, 4.f, 0},                               // jump 2: big kicker + landing
+  {22, 4.5f, 30, 46, 0, 3.f}, {22, 4.5f, 46, 60, 3.f, 3.f}, {22, 4.5f, 60, 76, 3.f, 0},   // platform
+  {44, 4.f, 36, 46, 0, 1.2f}, {44, 4.f, 46, 56, 1.2f, 0}, {44, 4.f, 62, 72, 0, 1.2f}, {44, 4.f, 72, 82, 1.2f, 0}, {44, 4.f, 88, 98, 0, 1.2f}, {44, 4.f, 98, 108, 1.2f, 0},   // humps
+  {8, 4.f, 165, 185, 0, 5.f}, {8, 4.f, 215, 240, 4.5f, 0},                                // mega jump after loop A
+  {-60, 5.f, 20, 50, 0, 7.f}, {-60, 5.f, 95, 130, 6.f, 0}};                               // huge jump
+#define NRMP ((int)(sizeof(RMP) / sizeof(RMP[0])))
+static float vm_height(float x, float z) {
+  float h = 0; if (!optRamp) return 0.f;
+  for (int i = 0; i < NRMP; i++) {
+    const Rmp *R = &RMP[i]; if (z < R->z0 || z > R->z1) continue;
+    float dx = x - R->cx; if (dx < 0) dx = -dx; float w = (R->hw - dx) / .8f; if (w <= 0) continue; if (w > 1) w = 1;
+    float t = (z - R->z0) / (R->z1 - R->z0), hh = (R->h0 + (R->h1 - R->h0) * t) * w; if (hh > h) h = hh;
+  }
+  return h;
+}
+// vertical loops: a helix (ring in the y-z plane whose lane drifts sideways by LOOP_L over one turn: entry at x = lx - L/2, exit at x = lx + L/2)
+#define NLOOP 2
+static const float LOOPS[NLOOP][3] = {{4.f, 125.f, 6.5f}, {-42.f, 110.f, 6.5f}};   // lx, lz, radius
+#define LOOP_L 8.f
+#define LOOP_HW 3.4f
+static float fatan2(float y, float x) {
+  float ax = x < 0 ? -x : x, ay = y < 0 ? -y : y, mx = ax > ay ? ax : ay, mn = ax > ay ? ay : ax;
+  if (mx < 1e-6f) return 0.f;
+  float a = mn / mx, s = a * a, r = a * (.999866f + s * (-.3302995f + s * (.180141f + s * (-.085133f + s * .0208351f))));
+  if (ay > ax) r = 1.5707964f - r; if (x < 0) r = 3.1415927f - r; if (y < 0) r = -r; return r;
 }
 #define TA 130.f
 #define TB 85.f
@@ -146,9 +194,22 @@ static int city_push_out(float *x, float *z, float r) {   // projects a ground p
   }
   return moved;
 }
+// ---- speed bumps (ralentisseurs): low humps across the roads, mid-block, on about half of the road segments
+static float city_bumps(float x, float z) {
+  if (!optRamp || x < -CITY_X_LIMIT || x > CITY_X_LIMIT || z < -CITY_Z_LIMIT || z > CITY_Z_LIMIT) return 0.f;
+  int rx, rz; float cx, cz;
+  if (cityPlan == 0) { rx = city_round((x - 14.f) / 28.f); rz = city_round((z - 18.f) / 36.f); cx = rx * 28.f + 14.f; cz = rz * 36.f + 18.f; }
+  else { city_nearest(x, z, &rx, &rz); city_center(rx, rz, &cx, &cz); }
+  float dx = x - cx, dz = z - cz, ax = dx < 0 ? -dx : dx, az = dz < 0 ? -dz : dz, h = 0.f;
+  if (ax > 10.4f && az < 1.6f && cityPlan != 2 && (city_hash(rx + (dx > 0 ? 1 : 0), rz) & 1)) h = bump(az, 0.f, 1.5f, 1.5f, .17f);          // road running along z
+  else if (az > 14.2f && ax < 1.6f && cityPlan != 1 && ((city_hash(rx + 17, rz + (dz > 0 ? 1 : 0)) >> 5) & 1)) h = bump(ax, 0.f, 1.5f, 1.5f, .17f);   // road running along x
+  return h;
+}
 static float gh(float x, float z) {
-  float h, ft = 0, ax = x < 0 ? -x : x;
-  if (mapId == 3 || mapId == 4) { gdist = ax; gfeat = 0; return 0; }   // 4 = carte vide (sol plat)
+  float h, ft = 0, bb = 0, ax = x < 0 ? -x : x;
+  gbumpF = 0.f;
+  if (mapId == 3) { gdist = ax; gfeat = 0; bb = city_bumps(x, z); gbumpF = bb > .01f; return bb; }
+  if (mapId == 4) { float hh = vm_height(x, z); gdist = ax; gfeat = hh > .02f ? 1.f : 0.f; return hh; }   // 4 = empty map: flat + ramps
   if (mapId == 0) {
     float rho = fsqrt(x * x / (TA * TA) + z * z / (TB * TB)), g2 = fsqrt(x * x / (TA * TA * TA * TA) + z * z / (TB * TB * TB * TB)) + 1e-6f;
     float d = rho < .15f ? -60.f : (rho - 1.f) * rho / g2, ad = d < 0 ? -d : d;
@@ -162,10 +223,11 @@ static float gh(float x, float z) {
     float wx = ((mapId == 2 ? 13.f : 8.f) - ax) / 3.f; wx = wx < 0 ? 0 : (wx > 1 ? 1 : wx);
     if (mapId == 2) ft = wx * bump(z, WALLZ, .45f, 3.f, 5.5f);
     else { float f = z / 300.f; f = z - 300.f * (float)(int)f;
-      if (z > 40.f && wx > 0) ft = wx * (bump(f, 80, 18, 2.5f, 2.2f) + bump(f, 150, 2.5f, 2.5f, 1.7f) + bump(f, 230, 30, 30, 2.5f)); }
+      if (z > 40.f && wx > 0) ft = wx * (bump(f, 80, 18, 2.5f, 2.2f) + bump(f, 150, 2.5f, 2.5f, 1.7f) + bump(f, 230, 30, 30, 2.5f));
+      if (optRamp && z > 40.f && ax < 5.8f) { bb = bump(f, 28, 1.4f, 1.4f, .17f) + bump(f, 112, 1.4f, 1.4f, .17f) + bump(f, 121, 1.4f, 1.4f, .17f) + bump(f, 130, 1.4f, 1.4f, .17f) + bump(f, 190, 1.4f, 1.4f, .17f) + bump(f, 198, 1.4f, 1.4f, .17f); gbumpF = bb > .01f; } }
     gdist = ax;
   }
-  gfeat = ft; return h + ft;
+  gfeat = ft; return h + ft + bb;
 }
 static void heading(float *hx, float *hz);
 static void traffic_update(float dt);
@@ -230,7 +292,7 @@ static void heading(float *hx, float *hz) {
   float l = fsqrt(x * x + z * z) + 1e-4f; *hx = x / l; *hz = z / l;
 }
 static void add_box(int kind, float x, float z) {
-  if (nn + 8 > NMAX || nobj >= 6) return;
+  if (nn + 8 > NMAX || nobj >= 12) return;
   const Obj *O = &OBJ[kind]; float SF = SOLF[solid], g = gh(x, z); int base = nn;
   for (int i = 0; i < 8; i++)
     n[nn++] = (Node){x + ((i & 1) - .5f) * O->sx, g + .1f + ((i >> 1) & 1) * O->sy, z + ((i >> 2) - .5f) * O->sz, 0, 0, 0, O->im, .1f, O->rc, 0, 3};
@@ -238,14 +300,22 @@ static void add_box(int kind, float x, float z) {
   okind[nobj++] = kind;
 }
 static void ep(float th, float off, float *x, float *z) { *x = TA * fsin(th + 1.5708f) + off; *z = TB * fsin(th); }
+static void tire_wall(float x, float z, int units) { for (int i = 0; i < units; i++) add_box(5, x + (i - (units - 1) * .5f) * 1.25f, z); }
 static void spawn_objects(void) {
-  float x, z; nob0 = nn; nobj = 0;
+  float x, z; nob0 = nn; nobj = 0; for (int i = 0; i < 12; i++) objDead[i] = 0;
+  if (!optObj) return;
   if (mapId == 0) {
     for (int i = 0; i < 3; i++) { ep(.15f + .15f * i, i & 1 ? 2.5f : -2.5f, &x, &z); add_box(0, x, z); }
     ep(.95f, 1.f, &x, &z); add_box(1, x, z); ep(.95f, 3.2f, &x, &z); add_box(2, x, z); ep(1.25f, -2.f, &x, &z); add_box(3, x, z);
+    ep(.6f, -3.f, &x, &z); add_box(4, x, z); ep(.6f, 3.f, &x, &z); add_box(4, x, z); ep(.75f, 0.f, &x, &z); add_box(6, x, z); ep(1.9f, 5.5f, &x, &z); tire_wall(x, z, 3);
   } else if (mapId == 1) {
     for (int i = 0; i < 3; i++) add_box(0, i & 1 ? 2.5f : -2.5f, 40.f + i * 16.f);
     add_box(1, -1.2f, 125.f); add_box(2, 1.2f, 125.f); add_box(3, 0, 170.f);
+    add_box(4, -2.f, 200.f); add_box(4, 2.f, 200.f); add_box(6, 0.f, 215.f); tire_wall(0.f, 235.f, 3);
+  } else if (mapId == 4) {
+    tire_wall(14.f, 22.f, 3);
+    add_box(4, -10.f, 18.f); add_box(4, -11.2f, 18.f); add_box(4, -10.6f, 19.2f); add_box(4, -10.6f, 16.8f); add_box(4, 30.f, 20.f); add_box(4, 31.2f, 20.f);
+    add_box(6, -6.f, 15.f); add_box(6, 6.f, 15.f); add_box(6, 0.f, 12.f);
   }
 }
 static void car_init(float x0, float z0, float hx, float hz, float lift, int objs) {
@@ -260,6 +330,7 @@ static void car_init(float x0, float z0, float hx, float hz, float lift, int obj
     n[i] = (Node){x0 + rx * qx + hx * qz, oy + qy, z0 + rz * qx + hz * qz, 0, 0, 0, w ? W->im : (pn ? (i >= 50 && i < 54 ? .5f : (i >= 54 ? 1.2f : 2.f)) : V->im * H->im), w ? W->r : (pn ? .08f : .15f), 0, 0, (uint8_t)w};
   }
   nn = NC; nb = 0; nbody = 0; dmg = 0; ntr = -1; nobj = 0;
+  if (tpOn) for (int w = 0; w < 4; w++) { tireR0[w] = W->r; tirePres[w] = 1.f; tpLeak[w] = 0; }
   for (int i = 0; i < 22; i++) for (int j = i + 1; j < 22; j++) {
     float dx = P[j][0] - P[i][0], dy = P[j][1] - P[i][1], dz = P[j][2] - P[i][2], d = fsqrt(dx * dx + dy * dy + dz * dz);
     int w = (i >= 14 && i < 18) + (j >= 14 && j < 18);
@@ -320,15 +391,24 @@ static void repair(float x0, float z0, float hx, float hz) {   // like BeamNG's 
   for (int g = 0; g < NG; g++) pAtt[g] = 0; for (int w = 0; w < 4; w++) wAtt[w] = 0;
   for (int i = 0; i < nbc; i++) { if (bm[i].f == 4) pAtt[bm[i].g]++; else if (bm[i].f == 1 && bm[i].o == 0) wAtt[bm[i].g]++; }
   car_pose(x0, z0, hx, hz, gh(x0, z0) + .5f); dmg = 0; fx_reset();
+  for (int w = 0; w < 4; w++) { tirePres[w] = 1.f; tpLeak[w] = 0; n[14 + w].r = tireR0[w]; }
 }
 static float thrustAcc, latX, latY, latZ;
-static void engine_update(float speed) {
+static void engine_update(float speed, float dt) {
   static const float GEAR_TOP[5] = {.18f, .34f, .54f, .77f, 1.f};
   static const float GEAR_PULL[5] = {1.f, .79f, .65f, .55f, .48f};
+  if (!manualGear && gearNow < 1) gearNow = 1;
+  if (manualGear) {                                    // clutch pedal / neutral: the engine revs freely and nothing reaches the wheels
+    if (shiftT > 0.f) shiftT -= dt;
+    if (stallT > 0.f) stallT -= dt * (clutchKey > .5f ? 3.f : 1.f);
+    float tr = 900.f + (thr > 0.f ? thr : 0.f) * 6100.f, k = dt * 6.f; if (k > 1.f) k = 1.f; freeRpm += (tr - freeRpm) * k;
+    if (clutchKey > .5f || shiftT > 0.f || gearNow == 0) { engineRpm = stallT > 0.f ? 0.f : freeRpm; engineOutput = 0.f; engBrake = .35f; return; }
+  }
   float vmax = engV * (turbo ? 1.5f : 1.f), limit = vmax * GEAR_TOP[gearNow - 1];
   engineRpm = 900.f + speed / (limit + .001f) * 5600.f;
   if (engineRpm > 7000.f) engineRpm = 7000.f;
-  if (thr > .05f && engineRpm > 6100.f && gearNow < 5) gearNow++;
+  if (manualGear) { }   // manual gearbox: the driver changes gears
+  else if (thr > .05f && engineRpm > 6100.f && gearNow < 5) gearNow++;
   else if (gearNow > 1 && engineRpm < 1700.f) gearNow--;
   limit = vmax * GEAR_TOP[gearNow - 1]; engineRpm = 900.f + speed / (limit + .001f) * 5600.f;
   if (engineRpm > 7000.f) engineRpm = 7000.f;
@@ -339,6 +419,13 @@ static void engine_update(float speed) {
   else torque = .99f - (engineRpm - 4600.f) * .00013f;
   if (torque < .55f) torque = .55f;
   engineOutput = torque * GEAR_PULL[gearNow - 1];
+  if (manualGear) {
+    if (!clutchAssist && gearNow >= 2 && stallT <= 0.f && speed < limit * .045f) stallT = 1.8f;   // pulled away in a high gear without the clutch: stall
+    if (engineRpm >= 6990.f) engineOutput = 0.f;   // rev limiter
+    engBrake = 1.3f + (5 - gearNow) * .45f * (engineRpm / 7000.f);   // engine braking: stronger in low gears
+    if (stallT > 0.f) { engineOutput = 0.f; engineRpm = 0.f; engBrake = 1.8f; }
+    freeRpm = engineRpm > 900.f ? engineRpm : 900.f;
+  } else engBrake = 1.f;
 }
 static void tire(Node *p, float fx, float fz, float nx, float ny, float nz, int drive, float dt) {
   float fn = fx * nx + fz * nz, tx = fx - nx * fn, ty = -ny * fn, tz = fz - nz * fn;
@@ -350,31 +437,58 @@ static void tire(Node *p, float fx, float fz, float nx, float ny, float nz, int 
     if (spd > 16.f) { gf = 1.f / (1.f + (spd - 16.f) * .045f); if (gf < .22f) gf = .22f; }
     if (p->t == 1 && (int)(p - n) < 16) gf *= .8f;
     lg *= gf; }
+  float tpf = 1.f; if (tpOn && p->t == 1) { int w = (int)(p - n) - 14; if (w >= 0 && w < 4) tpf = tirePres[w]; }
+  lg *= .4f + .6f * tpf;
+  float hb = (tpOn && p->t == 1 && (int)(p - n) < 16) ? hbrake : 0.f;   // handbrake: rear wheels lock, lose side grip and drive
+  if (hb > 0.f) { lg *= 1.f - .82f * hb; p->vx *= 1.f - .004f * hb; p->vz *= 1.f - .004f * hb; }
+  if (tpf < 1.f) { float rd = 1.f - (1.f - tpf) * .0015f; p->vx *= rd; p->vz *= rd; }   // flat tyre: rolling drag
   float dvm = lg * 3.2f * G * dt * 3.f, d = vl * .5f; if (d > dvm) d = dvm; if (d < -dvm) d = -dvm;   // grip is limited: the tire slides instead of tipping the car over
   p->vx -= lx * d * .3f; p->vy -= ly * d * .3f; p->vz -= lz * d * .3f;           // part of the grip acts at the tire...
   { float J = d / p->im * .7f; latX -= lx * J; latY -= ly * J; latZ -= lz * J; }  // ...the rest through the whole body (no tipping over)
-  if (!drive) return;
+  if (!drive || hb > .3f) return;
   float vf = p->vx * tx + p->vy * ty + p->vz * tz;
-  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * 1.8f * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff;
+  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * 1.8f * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff * (.55f + .45f * tpf);
   if (thr != 0 && !(thr < 0 && vf < -10)) {   // no top-speed cut-off
 #ifdef THRUSTBODY
     thrustAcc += thr * eA * dt * .25f;
 #else
     float a2 = thr * eA * dt; p->vx += tx * a2; p->vy += ty * a2; p->vz += tz * a2;
 #endif
-  } else if (thr == 0.f && (vf > .5f || vf < -.5f)) { float drag = engA * .018f * dt * (vf > 0 ? 1.f : -1.f); p->vx -= tx * drag; p->vy -= ty * drag; p->vz -= tz * drag; }
+  } else if (thr == 0.f && (vf > .5f || vf < -.5f)) { float drag = engA * .018f * dt * engBrake * (vf > 0 ? 1.f : -1.f); p->vx -= tx * drag; p->vy -= ty * drag; p->vz -= tz * drag; }
   if (brk > 0) { float bf = 1.f - .05f * brk * tuneBrake * weatherGrip * (.4f + .6f * gripF); p->vx *= bf; p->vy *= bf; p->vz *= bf; }
+}
+static void obj_remove(int oi) {                          // silently removes an object (settings: objects off)
+  int base = nob0 + oi * 8; objDead[oi] = 1;
+  for (int k = 0; k < 8; k++) { Node *p = &n[base + k]; p->t = 9; p->y = -100.f; p->vx = p->vy = p->vz = 0.f; }
+  for (int i = 0; i < nb; i++) if (bm[i].o == 2 && bm[i].a >= base && bm[i].a < base + 8) bm[i].f = 2;
+}
+static void objects_clear(void) { for (int o = 0; o < nobj; o++) if (!objDead[o]) obj_remove(o); }
+static void barrel_blow(int oi) {                         // explosive barrel: blast pushes every node around, chain reaction on neighbouring barrels
+  objDead[oi] = 1; int base = nob0 + oi * 8; float bx = 0, by = 0, bz = 0;
+  for (int k = 0; k < 8; k++) { bx += n[base + k].x * .125f; by += n[base + k].y * .125f; bz += n[base + k].z * .125f; }
+  if (blastN < 4) { blastP[blastN][0] = bx; blastP[blastN][1] = by; blastP[blastN][2] = bz; blastN++; }
+  for (int i = 0; i < nn; i++) { if (i >= base && i < base + 8) continue; Node *p = &n[i]; if (p->t == 9) continue;
+    float dx = p->x - bx, dy = p->y - by + .3f, dz = p->z - bz, d = fsqrt(dx * dx + dy * dy + dz * dz) + .5f; if (d > 15.f) continue;
+    float k = 20.f / (1.f + d * .5f) / d; p->vx += dx * k; p->vy += dy * k + 2.f; p->vz += dz * k; }
+  for (int k = 0; k < 8; k++) { Node *p = &n[base + k]; p->t = 9; p->y = -100.f; p->vx = p->vy = p->vz = 0.f; }   // t = 9: removed node
+  for (int i = 0; i < nb; i++) if (bm[i].o == 2 && bm[i].a >= base && bm[i].a < base + 8) bm[i].f = 2;
+  float cx = (n[4].x + n[5].x) * .5f, cz = (n[4].z + n[5].z) * .5f, ddx = cx - bx, ddz = cz - bz, dd = fsqrt(ddx * ddx + ddz * ddz);
+  if (dd < 12.f && flashT < .6f) flashT = .6f;
+  if (dd < 5.f && !burning && fuel > .03f) { burning = 1; fireT = 0.f; fireI = .2f; boomAt = 1e9f; }
 }
 static void step(float dt) {
   float hx, hz, thx, thz; heading(&hx, &hz); thx = hx; thz = hz;
   if (ntr >= 0) { float x = n[ntr+4].x + n[ntr+5].x + n[ntr+6].x + n[ntr+7].x - n[ntr].x - n[ntr+1].x - n[ntr+2].x - n[ntr+3].x, z = n[ntr+4].z + n[ntr+5].z + n[ntr+6].z + n[ntr+7].z - n[ntr].z - n[ntr+1].z - n[ntr+2].z - n[ntr+3].z, l = fsqrt(x * x + z * z) + 1e-4f; thx = x / l; thz = z / l; }
   float forward = 0; for (int i = 0; i < 20; i++) forward += (n[i].vx * hx + n[i].vz * hz) / 20.f;
-  engine_update(forward < 0 ? -forward : forward);
+  engine_update(forward < 0 ? -forward : forward, dt);
   float s = steer, c = fsin(s + 1.5708f), tot = 0;
-  for (int i = 0; i < nn; i++) n[i].vy -= G * dt;
+  uint8_t awake[12]; if (nobj) { float acx = (n[4].x + n[5].x) * .5f, acz = (n[4].z + n[5].z) * .5f; for (int o = 0; o < nobj; o++) { float dx = n[nob0 + o * 8].x - acx, dz = n[nob0 + o * 8].z - acz; awake[o] = dx < 60.f && dx > -60.f && dz < 60.f && dz > -60.f; } }
+#define ASLEEP(i) (nobj && (i) >= nob0 && !awake[((i) - nob0) >> 3])   // far objects are frozen (saves CPU)
+  for (int i = 0; i < nn; i++) if (!ASLEEP(i)) n[i].vy -= G * dt;
   for (int i = 0; i < nb; i++) {
     Beam *b = &bm[i];
     if (b->f == 2) { if (b->o == 0) tot += b->t0 == 0 ? .45f : (b->t0 == 4 ? .08f : 0); continue; }
+    if (b->o == 2 && ASLEEP(b->a)) continue;
     Node *p = &n[b->a], *q = &n[b->b];
     float dx = q->x - p->x, dy = q->y - p->y, dz = q->z - p->z, L = fsqrt(dx * dx + dy * dy + dz * dz) + 1e-4f;
     float ux = dx / L, uy = dy / L, uz = dz / L;
@@ -385,6 +499,7 @@ static void step(float dt) {
     if (b->f == 0) {
       if (e > b->yl) b->l0 += (e - b->yl) * b->l0 * .5f; else if (e < -b->yl) b->l0 += (e + b->yl) * b->l0 * .5f;
       if (e > b->bk) b->f = 2;
+      if (b->o == 2 && nobj) { int oi = (b->a - nob0) >> 3; if (oi >= 0 && oi < nobj && okind[oi] == 4 && !objDead[oi]) { float dd = (b->l0 - b->lr) / b->lr; if (dd < 0) dd = -dd; if (dd > .2f || b->f == 2) barrel_blow(oi); } }
       if (b->o == 0) { float d = (b->l0 - b->lr) / b->lr; tot += d < 0 ? -d : d; }
     } else if (b->f == 1) {
       if (e > b->bk) { b->f = 2; if (b->o == 0) wAtt[b->g]--; }
@@ -401,6 +516,8 @@ static void step(float dt) {
   thrustAcc = 0; latX = latY = latZ = 0;
   for (int i = 0; i < nn; i++) {
     Node *p = &n[i];
+    if (p->t == 9) { p->vx = p->vy = p->vz = 0.f; continue; }
+    if (ASLEEP(i)) continue;
     p->vx *= .9997f; p->vy *= .9997f; p->vz *= .9997f;
     p->x += p->vx * dt; p->y += p->vy * dt; p->z += p->vz * dt;
     p->gnd = 0;
@@ -410,12 +527,33 @@ static void step(float dt) {
       float il = 1.f / fsqrt(1 + gx * gx + gz * gz), nx = -gx * il, ny = il, nz = -gz * il, d = pen * il; if (d > .25f) d = .25f;
       p->x += nx * d; p->y += ny * d; p->z += nz * d; p->gnd = 1;
       float vn = p->vx * nx + p->vy * ny + p->vz * nz;
+      if (optPunct && tpOn && p->t == 1 && vn < -9.f && i >= 14 && i < 18) { int w = i - 14; if (!tpLeak[w] && fx_rand() < (-vn - 9.f) * .12f) tpLeak[w] = 1; }   // hard impact: burst tyre
       { float rb = p->t == 1 ? 1.f : 1.1f; if (vn < 0) { p->vx -= vn * nx * rb; p->vy -= vn * ny * rb; p->vz -= vn * nz * rb; } }
       if (p->t == 1 && wAtt[i - 14] > 0) { if (i >= 16) tire(p, hx * c + hz * s, hz * c - hx * s, nx, ny, nz, 1, dt); else tire(p, hx, hz, nx, ny, nz, 1, dt); }
       else if (p->t == 2) tire(p, thx, thz, nx, ny, nz, 0, dt);
       else if (p->t == 1) { p->vx *= .995f; p->vz *= .995f; }
       else { p->vx *= .96f; p->vz *= .96f; }
     }
+  }
+  if (mapId == 4 && optRamp) {                                       // vertical loops: contact with the inside of the ring + sideways guidance along the helix
+    float sxc = 0, sxx = 0, srt = 0; int cnt = 0;
+    for (int li = 0; li < NLOOP; li++) {
+      float lx = LOOPS[li][0], lz = LOOPS[li][1], R = LOOPS[li][2];
+      for (int i = 0; i < nn; i++) {
+        Node *p = &n[i]; float adx = p->x - lx; if (adx > 9.f || adx < -9.f) continue;
+        float dy = p->y - R, dz = p->z - lz; if (dz > R + 1.f || dz < -R - 1.f || dy > R + 1.f || dy < -R - 1.f) continue;
+        float d = fsqrt(dy * dy + dz * dz) + 1e-4f; if (d <= R - p->r || d > R + .3f) continue;
+        float ph = fatan2(dz, -dy); if (ph < 0) ph += 6.2831853f;
+        float xc = lx - LOOP_L * .5f + LOOP_L * ph * .15915494f, lat = p->x - xc; if (lat > LOOP_HW || lat < -LOOP_HW) continue;
+        float ny = -dy / d, nz = -dz / d, pen = d + p->r - R; if (pen > .25f) pen = .25f;
+        p->y += ny * pen; p->z += nz * pen; p->gnd = 1;
+        float vn = p->vy * ny + p->vz * nz; if (vn < 0) { float rb = p->t == 1 ? 1.f : 1.1f; p->vy -= vn * ny * rb; p->vz -= vn * nz * rb; }
+        if (p->t == 1 && thr > 0.f) { float ty = -nz, tz = ny, vt = p->vy * ty + p->vz * tz; if (vt < 24.f) { float a2 = thr * 40.f * dt; p->vy += ty * a2; p->vz += tz * a2; } }   // drive along the track
+        sxc += xc; sxx += p->x; srt += LOOP_L * .15915494f * (-dy * p->vz + dz * p->vy) / (d * d); cnt++;
+      }
+    }
+    if (cnt) { float xcT = sxc / cnt, xm = sxx / cnt, rate = srt / cnt, vm = 0; for (int i = 0; i < 20; i++) vm += n[i].vx * .05f;
+      float vxt = rate + 4.f * (xcT - xm), k = dt * 12.f; if (k > 1.f) k = 1.f; float dv = (vxt - vm) * k; for (int i = 0; i < nn; i++) n[i].vx += dv; }
   }
   if (mapId == 3) for (int i = 0; i < 50; i++) {
     Node *p = &n[i]; if (p->y + p->r <= 0) continue;
@@ -453,7 +591,7 @@ static void step(float dt) {
   if (nobj) {                                           // car/trailer beams vs object corner spheres
     float cx = (n[4].x + n[5].x) * .5f, cz = (n[4].z + n[5].z) * .5f;
     for (int j = nob0; j < nn; j++) {
-      Node *p = &n[j]; float ddx = p->x - cx, ddz = p->z - cz; if (ddx > 18 || ddx < -18 || ddz > 18 || ddz < -18) continue;
+      Node *p = &n[j]; if (p->t == 9) continue; float ddx = p->x - cx, ddz = p->z - cz; if (ddx > 18 || ddx < -18 || ddz > 18 || ddz < -18) continue;
       for (int i = 0; i < nbc; i++) {
         Beam *b = &bm[i]; if (b->f > 1) continue;
         Node *a = &n[b->a], *q = &n[b->b];
@@ -521,6 +659,15 @@ static void fx_update(float dt) {                 // once per frame
   float vx = 0, vz = 0; for (int i = 0; i < 20; i++) { vx += n[i].vx * .05f; vz += n[i].vz * .05f; }
   if (!fxPrimed) { vcmx = vx; vcmz = vz; fxPrimed = 1; }
   float dvx = vx - vcmx, dvz = vz - vcmz; jolt = fsqrt(dvx * dvx + dvz * dvz); vcmx = vx; vcmz = vz;   // speed lost in this frame
+  if (n == nPl) {                                   // airbags + seat belt, player car only
+    if (abT < 90.f) abT += dt;
+    if (airbagsOn && jolt > 6.f && !exploded) {
+      float hx, hz; heading(&hx, &hz); float al = dvx * hx + dvz * hz, la = dvx * hz - dvz * hx, ala = la < 0 ? -la : la;
+      if (al < -.6f * jolt && !abFront) { abFront = 1; abBang = 1; abT = 0.f; }
+      if (ala > .6f * jolt) { if (la > 0.f) { if (!abSideL) { abSideL = 1; abBang = 1; abT = 0.f; } } else if (!abSideR) { abSideR = 1; abBang = 1; abT = 0.f; } }
+    }
+    if (jolt > 3.f) { float w = beltOn ? ((abFront || abSideL || abSideR) ? .012f : .03f) : (abFront ? .04f : .08f); occRisk += (jolt - 3.f) * w; if (occRisk > 1.f) occRisk = 1.f; }
+  }
   float spd = fsqrt(vx * vx + vz * vz), ta = thr < 0 ? -thr : thr;
   comp_damage();
   if (radHp < .6f && coolant > 0.f) { coolant -= dt * (.6f - radHp) * .16f; if (coolant < 0.f) coolant = 0.f; }    // coolant leak
@@ -686,7 +833,7 @@ static void bot_spawn(int slot, int src, float x, float z, float hx, float hz, f
   for (unsigned i = 0; i < sizeof(Ctx); i++) ((char *)c)[i] = 0;
   c->n = b->nd; c->bm = b->bd; c->nbCap = BOT_MB; c->cv = NV; c->cw = 0; c->cs = 1; c->ce = police ? 2 : (src & 1); c->cc = 0; c->ntr = -1;
   bot_enter(b);
-  car_init(x, z, hx, hz, .12f, 0);
+  { int tg = tpOn; tpOn = 0; car_init(x, z, hx, hz, .12f, 0); tpOn = tg; }
   for (int i = 0; i < nn; i++) { n[i].vx = hx * speed; n[i].vz = hz * speed; }
   bot_leave(b);
 }
@@ -779,7 +926,9 @@ static void world_step(float dt) {
   step(dt);
   if (!bots_active()) return;
   ctx_save(&pctx);
-  for (int s = 0; s < MAX_PHYS; s++) if (bots[s].used) { Bot *b = &bots[s]; ctx_load(&b->c); step(dt); ctx_save(&b->c); }
+  { int mg = manualGear, tg = tpOn; manualGear = 0; tpOn = 0;   // bots always use the automatic gearbox
+    for (int s = 0; s < MAX_PHYS; s++) if (bots[s].used) { Bot *b = &bots[s]; ctx_load(&b->c); step(dt); ctx_save(&b->c); }
+    manualGear = mg; tpOn = tg; }
   ctx_load(&pctx);
   cars_collide();
 }
