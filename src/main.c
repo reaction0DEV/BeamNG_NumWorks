@@ -10,6 +10,10 @@ static int lw = 160, lh = 112, hor = 44; static float foc = 130.f, zmax = 72.f, 
 #define FOC foc
 #define HOR hor
 #define C(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
+#define ACC C(255, 102, 0)      // BeamNG-style orange accent
+#define BGC C(18, 19, 22)       // dark UI background
+#define PNL C(26, 27, 32)       // panel row
+#define PSEL C(58, 36, 20)      // selected row
 enum { S_MENU, S_GARAGE, S_GAME, S_PAUSE, S_DMG, S_SET, S_CTRL, S_KEYS, S_QUICK };
 static uint16_t fb[MAXW * MAXH], buf[320 * 8]; static uint8_t zb[MAXW * MAXH], xmap[320];
 static int structure, CXc = 80, curZ = -1, showTop = 1, crashI = 2, camInterior;
@@ -230,6 +234,7 @@ static const Bx SYSB[] = {
 #define NSB ((int)(sizeof(SYSB) / sizeof(SYSB[0])))
 static const Bx *bx_at(int i) { return i < NBX ? &BXS[i] : &SYSB[i - NBX]; }
 static int bx_show(const Bx *B, int bayOpen, int trunkOpen) {
+  if (camInterior) return B->cond == 0;   // first-person: cabin only, no engine bay / trunk / underbody
   switch (B->cond) {
     case 1: return trunkOpen; case 2: return bayOpen; case 3: return bayOpen || pAtt[7] <= 0; case 4: return ce == 3 && (bayOpen || pAtt[7] <= 0);
     case 5: return bayOpen && radHp < .6f; case 6: return trunkOpen && tankHp < .55f; case 7: return !camInterior && camy - n[4].y < 1.9f;
@@ -244,6 +249,7 @@ static const uint8_t HULLS = 0;
 #endif
 static void drawpat(int pi, const Pat *p, int pass, int facing, float cxm) {
   if (((DBG_HIDE & 1) && PAT[pi].kind == K_HOOD) || ((DBG_HIDE & 2) && PAT[pi].kind == K_TRUNK) || ((DBG_HIDE & 4) && PAT[pi].kind == K_DOOR) || ((DBG_HIDE & 8) && (PAT[pi].kind == K_ROOF || PAT[pi].kind == K_WIN))) return;
+  if (camInterior && p->kind == K_WIN && p->grp == 6) return;   // first-person: windshield removed for a clear view
   int nu = p->nu, nv = p->nv; const Veh *V = &VEH[cv]; float dk = 1.f - dmg * .006f;
   float c[4][3]; for (int k = 0; k < 4; k++) { c[k][0] = PX[p->n[k]]; c[k][1] = PY[p->n[k]]; c[k][2] = PZ[p->n[k]]; }
   float ax = c[1][0] - c[0][0], ay = c[1][1] - c[0][1], az = c[1][2] - c[0][2], bx = c[3][0] - c[0][0], by = c[3][1] - c[0][1], bz = c[3][2] - c[0][2]; uint8_t visible[64];
@@ -337,7 +343,7 @@ static void draw_overlay(float kmh, int gear) {
     frect(0, bandY, lw, lh - bandY, C(26, 30, 36)); frect(0, bandY, lw, 1, C(95, 105, 112));
     gauge(lw * 62 / 100, lh - gr - 2, gr, rpm, C(245, 80, 55), -1);
     gauge(lw * 80 / 100, lh - gr - 2, gr, kmh / (engV * 3.6f * (turbo ? 1.5f : 1.f) + 1.f), C(240, 205, 85), g);
-    float a = steer * 2.6f;                                   // the wheel turns with the front wheels
+    float a = -steer * 2.6f;                                   // the wheel turns with the front wheels
     ring2(wx, wy, R, 3, C(58, 62, 70)); ring2(wx, wy, R + 1, 1, C(150, 158, 165)); ring2(wx, wy, R - 2, 1, C(20, 22, 26));
     for (int k = 0; k < 3; k++) { float th = a + 1.5708f * (k == 0 ? 2 : (k == 1 ? 0 : -1)); int x = wx + (int)((R - 2) * fsin(th + 1.5708f)), y = wy - (int)((R - 2) * fsin(th));
       line(wx, wy, x, y, C(58, 62, 70)); line(wx, wy + 1, x, y + 1, C(58, 62, 70)); }
@@ -376,6 +382,7 @@ static void car(void) {
     for (int k = 0; k < 3; k++) { CFX[k] = dx[k] / sxx; CFY[k] = dy[k] / syy; CFZ[k] = dz[k] / szz; } CFO[0] = wx; CFO[1] = wy; CFO[2] = wz; }
   int ri[64]; for (int i = 0; i < 60; i++) ri[i] = i;
   float oh = oHood, ot = oTrunk, od = oDoor, rhx, rhz; heading(&rhx, &rhz);
+  if (camInterior) oh = ot = od = 0.f;
   if (oh > .02f && pAtt[0] > 0) { ri[22] = rot(22, 25, 24, oh * 1.3f, 0, cxm, czm, rhx, rhz); ri[23] = rot(23, 25, 24, oh * 1.3f, 0, cxm, czm, rhx, rhz); }
   if (ot > .02f && pAtt[3] > 0) { ri[34] = rot(34, 37, 36, ot * 1.2f, 0, cxm, czm, rhx, rhz); ri[35] = rot(35, 37, 36, ot * 1.2f, 0, cxm, czm, rhx, rhz); }
   if (od > .02f && pAtt[4] > 0) { ri[38] = rot(38, 39, 40, od * 1.1f, 1, cxm, czm, rhx, rhz); ri[41] = rot(41, 39, 40, od * 1.1f, 1, cxm, czm, rhx, rhz); }
@@ -404,7 +411,7 @@ static void car(void) {
   for (int k = 0; k < NPAT; k++) if (PL[k].cls == 1 && !fc[k]) { it[ni] = k; dp[ni++] = pd[k]; }
   for (int b = 0; b < NBX + NSB; b++) { const Bx *Q = bx_at(b); if (!bx_show(Q, bayOpen, trunkOpen)) continue;
     float x, y, z; fpt(Q->fr, (Q->a0 + Q->a1) / 2, (Q->b0 + Q->b1) / 2, (Q->c0 + Q->c1) / 2, &x, &y, &z); it[ni] = 100 + b; dp[ni++] = (x - camx) * camhx + (z - camz) * camhz; }
-  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (sw * camSide > 0) continue; it[ni] = 200 + w; dp[ni++] = (n[w].x - camx) * camhx + (n[w].z - camz) * camhz; }
+  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (camInterior || sw * camSide > 0) continue; it[ni] = 200 + w; dp[ni++] = (n[w].x - camx) * camhx + (n[w].z - camz) * camhz; }
   for (int i = 1; i < ni; i++) { int a = it[i]; float v = dp[i]; int j = i - 1; while (j >= 0 && dp[j] < v) { it[j + 1] = it[j]; dp[j + 1] = dp[j]; j--; } it[j + 1] = a; dp[j + 1] = v; }
   const Whl *W = &WHL[cw];
   for (int q = 0; q < ni; q++) { int a = it[q];
@@ -415,7 +422,7 @@ static void car(void) {
   for (int k = 0; k < NPAT; k++) if (PL[k].cls == 0 && (fc[k] || PL[k].two)) { ok[no] = k; od2[no++] = pd[k]; }
   for (int i = 1; i < no; i++) { int a = ok[i]; float v = od2[i]; int j = i - 1; while (j >= 0 && od2[j] < v) { ok[j + 1] = ok[j]; od2[j + 1] = od2[j]; j--; } ok[j + 1] = a; od2[j + 1] = v; }
   for (int q = 0; q < no; q++) drawpat(ok[q], &PL[ok[q]], 2, fc[ok[q]], cxm);
-  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (sw * camSide <= 0) continue; float ax = hz_, az = -hx_; if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); } wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); }
+  for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (camInterior || sw * camSide <= 0) continue; float ax = hz_, az = -hx_; if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); } wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); }
   for (int q = 0; q < no; q++) { int k = ok[q]; if (fc[k] && (PL[k].kind == K_WIN || PL[k].kind == K_DOOR)) drawpat(k, &PL[k], 3, 1, cxm); }
 }
 // ---- fire, smoke, coolant steam and the explosion fireball (world-space sprites, painted in the car's depth slot)
@@ -696,10 +703,10 @@ static void present(int xd0) {
   }
 }
 static void draw_bot(int slot) {          // a physical bot is drawn by the very same car() and draw_fx() as the player's car
-  Bot *b = &bots[slot]; float sw = wspin, sh = oHood, sd = oDoor, st = oTrunk; int ss = structure;
-  bot_enter(b); wspin = b->spin; oHood = oDoor = oTrunk = 0.f; structure = 0;
+  Bot *b = &bots[slot]; float sw = wspin, sh = oHood, sd = oDoor, st = oTrunk; int ss = structure, sci = camInterior;
+  camInterior = 0; bot_enter(b); wspin = b->spin; oHood = oDoor = oTrunk = 0.f; structure = 0;
   car(); draw_fx();
-  bot_leave(b); wspin = sw; oHood = sh; oDoor = sd; oTrunk = st; structure = ss;
+  bot_leave(b); wspin = sw; oHood = sh; oDoor = sd; oTrunk = st; structure = ss; camInterior = sci;
 }
 static float depth_of(float x, float z) { return (x - camx) * camhx + (z - camz) * camhz; }
 static void scene(int xd0) {
@@ -753,12 +760,14 @@ static char *cat(char *d, const char *s) { while (*s) *d++ = *s++; *d = 0; retur
 static char *num(char *s, int v) { char t[8]; int k = 0; if (v < 0) v = 0; do { t[k++] = '0' + v % 10; v /= 10; } while (v && k < 7); while (k) *s++ = t[--k]; *s = 0; return s; }
 static void txt(const char *s, int x, int y, int big, uint16_t fg, uint16_t bg) { eadk_display_draw_string(s, (eadk_point_t){x, y}, big, fg, bg); }
 static void row(const char *s, int x, int y, int w, int h, int sel) {
-  uint16_t bg = sel ? C(40, 90, 200) : C(15, 18, 28);
-  eadk_display_push_rect_uniform((eadk_rect_t){x, y, w, h}, bg); txt(s, x + 6, y + (h - 14) / 2, 0, 0xFFFF, bg);
+  uint16_t bg = sel ? PSEL : PNL;
+  eadk_display_push_rect_uniform((eadk_rect_t){x, y, w, h}, bg);
+  if (sel) eadk_display_push_rect_uniform((eadk_rect_t){x, y, 3, h}, ACC);
+  txt(s, x + 9, y + (h - 14) / 2, 0, sel ? 0xFFFF : C(185, 188, 198), bg);
 }
 static int pressed(uint64_t k, int key) { return ((k >> key) & 1) && !((pk >> key) & 1); }
 static int down(uint64_t k, int key) { return (k >> key) & 1; }
-static void clear(void) { eadk_display_push_rect_uniform(eadk_screen_rect, C(15, 18, 28)); }
+static void clear(void) { eadk_display_push_rect_uniform(eadk_screen_rect, BGC); }
 static void garage_car(void) { car_init(mapId == 0 ? TA : 0, 0, 0, 1, .02f, 0); }
 static int ct, stopT, score; static float vpk, impV;
 static int tutOn, tutStep, tutFlag, tutOk, evDmg, evRepair, mapBak;
@@ -799,50 +808,77 @@ static void tut_text(char *text) {
 }
 static const char *MAPN[4] = {"Circuit", "Route", "Crash-test", "Ville"}, *SOLN[3] = {"Robuste", "Normale", "Fragile"};
 static const char *MN[9] = {"Jouer", "Garage", "Carte", "Solidite", "Test", "Reglages", "Commandes", "Tutoriel", "Quitter"};
+static float menuT;
+static void menu_init(void) { garage_car(); traffic_reset(); menuT = 0.f; }
+static void menu_bg(void) {                // slow cinematic orbit around the selected map, running live physics / traffic
+  thr = 0; brk = 0; steer = 0; turbo = 0;
+  for (int i = 0; i < 4; i++) world_step(.0035f);
+  traffic_update(.05f); fx_update(.05f); bots_frame(.05f); menuT += .05f;
+  float hx, hz, cx, cy, cz; frame(&hx, &hz, &cx, &cy, &cz);
+  float ang = menuT * .14f + .6f, dist = 12.f + 4.f * fsin(menuT * .09f) + (ntr >= 0 ? 3.f : 0.f), el = 1.6f + 1.4f * (fsin(menuT * .06f) + 1.f);
+  camhx = fsin(ang); camhz = fsin(ang + 1.5708f); camx = cx - camhx * dist; camz = cz - camhz * dist; camy = cy + el;
+  float gy = gh(camx, camz) + 1.2f; if (camy < gy) camy = gy;
+  int xd = 154, xl = xd * lw / 320; CXc = xl + (lw - xl) / 2; hor = (int)(lh * .62f - (camy - cy) * foc / dist);
+  int sv = showTop, sci = camInterior, ss = structure; showTop = 0; camInterior = 0; structure = 0; oHood = oDoor = oTrunk = 0.f;
+  scene(xd); showTop = sv; camInterior = sci; structure = ss; present(xd);
+}
 static void draw_menu(int sel) {
-  clear(); txt("NumBeam 3D", 90, 6, 1, C(230, 60, 50), C(15, 18, 28)); txt("simulateur de collision", 82, 32, 0, C(150, 160, 190), C(15, 18, 28));
+  eadk_display_push_rect_uniform((eadk_rect_t){0, 0, 152, 240}, BGC);
+  eadk_display_push_rect_uniform((eadk_rect_t){152, 0, 2, 240}, ACC);
+  eadk_display_push_rect_uniform((eadk_rect_t){154, 224, 166, 16}, BGC);
+  txt("NUMBEAM", 10, 6, 1, 0xFFFF, BGC); txt("3D", 114, 6, 1, ACC, BGC); txt("simulateur de collision", 6, 30, 0, C(130, 134, 146), BGC);
+  eadk_display_push_rect_uniform((eadk_rect_t){6, 45, 140, 1}, C(60, 62, 70));
   for (int i = 0; i < 9; i++) { char s[40], *p = s; p = cat(p, MN[i]);
     if (i == 2) { p = cat(p, ": "); cat(p, MAPN[mapId]); } else if (i == 3) { p = cat(p, ": "); cat(p, SOLN[solid]); } else if (i == 4) { p = cat(p, ": "); p = num(p, CRASHV[crashI]); cat(p, " km/h"); }
-    row(s, 80, 46 + i * 19, 160, 17, i == sel); }
-  txt("Haut/Bas, Gauche/Droite, OK", 66, 226, 0, C(110, 120, 150), C(15, 18, 28));
+    row(s, 4, 50 + i * 19, 144, 17, i == sel); }
+  txt("Haut/Bas  Gauche/Droite  OK", 4, 226, 0, C(110, 114, 126), BGC);
+  char t[40], *q = t; q = cat(q, "Carte: "); cat(q, MAPN[mapId]); txt(t, 162, 226, 0, ACC, BGC);
+}
+static void grow(const char *l, const char *v, int y, int sel) {
+  uint16_t bg = sel ? PSEL : PNL; eadk_display_push_rect_uniform((eadk_rect_t){0, y, 160, 14}, bg);
+  if (sel) eadk_display_push_rect_uniform((eadk_rect_t){0, y, 3, 14}, ACC);
+  txt(l, 8, y, 0, sel ? 0xFFFF : C(150, 154, 166), bg); if (v && *v) txt(v, 72, y, 0, sel ? ACC : 0xFFFF, bg);
+}
+static void gbar(const char *l, float f, int y) {
+  if (f < 0) f = 0; if (f > 1) f = 1;
+  eadk_display_push_rect_uniform((eadk_rect_t){0, y, 160, 13}, BGC); txt(l, 6, y - 1, 0, C(150, 154, 166), BGC);
+  eadk_display_push_rect_uniform((eadk_rect_t){50, y + 3, 104, 7}, C(40, 42, 50)); eadk_display_push_rect_uniform((eadk_rect_t){51, y + 4, (int)(102 * f), 5}, ACC);
 }
 static void draw_garage(int sel, int gv) {
-  eadk_display_push_rect_uniform((eadk_rect_t){0, 0, 160, 240}, C(15, 18, 28));
-  const char *lab[12] = {"Vue (OK)", "Vehicule", "Generer", "Roues", "Susp.", "Moteur", "Chassis", "Remorque", "Capot", "Portes", "Coffre", "JOUER"};
+  eadk_display_push_rect_uniform((eadk_rect_t){0, 0, 160, 240}, BGC);
+  eadk_display_push_rect_uniform((eadk_rect_t){0, 16, 160, 1}, ACC); txt("GARAGE", 8, 1, 0, 0xFFFF, BGC); txt(VEH[cv].nm, 80, 1, 0, ACC, BGC);
+  const char *lab[12] = {"Vue 3D", "Vehicule", "Generer", "Roues", "Susp.", "Moteur", "Chassis", "Remorque", "Capot", "Portes", "Coffre", "JOUER"};
   char seed[16], *sp = seed; *sp++ = '#'; num(sp, (int)genSeed);
-  const char *val[11] = {"", VEH[cv].nm, seed, WHL[cw].nm, SUS[cs].nm, ENG[ce].nm, CHA[cc].nm, trl ? "oui" : "non", tHood > .5f ? "ouvert" : "ferme", tDoor > .5f ? "ouvertes" : "fermees", tTrunk > .5f ? "ouvert" : "ferme"};
-  for (int i = 0; i < 12; i++) { char s[32], *p = s; p = cat(p, lab[i]); if (i > 0 && i < 11) { p = cat(p, ": "); cat(p, val[i]); } row(s, 4, 3 + i * 16, 152, 15, i == sel); }
-  if (gv) { txt("Fleches: tourner/hauteur", 4, 198, 0, C(255, 210, 80), C(15, 18, 28)); txt("+ / - : zoom", 4, 211, 0, C(255, 210, 80), C(15, 18, 28)); txt("OK ou Retour: fin", 4, 224, 0, C(255, 210, 80), C(15, 18, 28)); return; }
-  char s[32], *p = s; p = cat(p, "Puiss "); p = num(p, (int)(ENG[ce].a * VEH[cv].pw * 10)); p = cat(p, " Vmax "); num(p, (int)(ENG[ce].v * 3.6f));
-  txt(s, 6, 198, 0, C(180, 190, 220), C(15, 18, 28));
-  p = s; p = cat(p, "Grip "); p = num(p, (int)(WHL[cw].gr * VEH[cv].gr * 100)); p = cat(p, " Solid. "); num(p, (int)(CHA[cc].k / 140 * (solid == 0 ? 1.6f : (solid == 2 ? .65f : 1.f))));
-  txt(s, 6, 211, 0, C(180, 190, 220), C(15, 18, 28));
-  p = s; p = cat(p, "Dim "); p = dec1(p, 4.6f * VEH[cv].sz); p = cat(p, "x"); p = dec1(p, 1.9f * VEH[cv].sx); p = cat(p, "x"); dec1(p, 1.45f * VEH[cv].sy);
-  txt(s, 6, 224, 0, C(180, 190, 220), C(15, 18, 28));
+  const char *val[11] = {"OK: orbite", VEH[cv].nm, seed, WHL[cw].nm, SUS[cs].nm, ENG[ce].nm, CHA[cc].nm, trl ? "oui" : "non", tHood > .5f ? "ouvert" : "ferme", tDoor > .5f ? "ouvertes" : "fermees", tTrunk > .5f ? "ouvert" : "ferme"};
+  for (int i = 0; i < 12; i++) grow(lab[i], i < 11 ? val[i] : "", 19 + i * 15, i == sel);
+  if (gv) { eadk_display_push_rect_uniform((eadk_rect_t){0, 200, 160, 40}, BGC); txt("Fleches: tourner/hauteur", 4, 200, 0, ACC, BGC); txt("+ / - : zoom", 4, 212, 0, ACC, BGC); txt("OK ou Retour: fin", 4, 224, 0, ACC, BGC); return; }
+  gbar("Puiss", ENG[ce].a * VEH[cv].pw / 23.f, 201);
+  gbar("Grip", WHL[cw].gr * VEH[cv].gr / .45f, 214);
+  gbar("Solid", CHA[cc].k / 140.f * SOLF[solid] / 230.f, 227);
 }
 static void draw_pause(int sel) {
   const char *it[8] = {"Reprendre", "Recommencer", "Options rapides", "Degats (dessus)", "Garage", "Reglages", "Commandes", "Menu principal"};
-  eadk_display_push_rect_uniform((eadk_rect_t){70, 8, 180, 224}, C(15, 18, 28)); txt("PAUSE", 140, 12, 0, 0xFFFF, C(15, 18, 28));
+  eadk_display_push_rect_uniform((eadk_rect_t){70, 8, 180, 224}, BGC); txt("PAUSE", 140, 12, 0, 0xFFFF, BGC);
   for (int i = 0; i < 8; i++) row(it[i], 80, 30 + i * 25, 160, 21, i == sel);
 }
 static void draw_set(int sel) {
   static const char *QN[3] = {"Basse", "Normale", "Haute"}, *FN[3] = {"Etroit", "Normal", "Large"}, *VN[3] = {"Courte", "Normale", "Longue"};
-  clear(); txt("REGLAGES", 120, 6, 1, C(230, 60, 50), C(15, 18, 28));
+  clear(); txt("REGLAGES", 120, 6, 1, ACC, BGC);
   for (int i = 0; i < 7; i++) { char s[40], *p = s;
     static const char *lb[7] = {"Qualite", "Direction", "Camera", "Champ de vision", "Distance de vue", "Test des touches", "Retour"};
     p = cat(p, lb[i]);
     if (i == 0) { p = cat(p, ": "); cat(p, QN[qual]); } else if (i == 1) { p = cat(p, ": "); num(p, steerL); } else if (i == 2) { p = cat(p, ": "); num(p, camL); }
     else if (i == 3) { p = cat(p, ": "); cat(p, FN[fovI]); } else if (i == 4) { p = cat(p, ": "); cat(p, VN[vdI]); }
     row(s, 40, 36 + i * 24, 240, 20, i == sel); }
-  txt("Direction/Camera: sensibilite 1 a 5", 38, 206, 0, C(150, 160, 190), C(15, 18, 28)); txt("Gauche/Droite: changer", 38, 222, 0, C(150, 160, 190), C(15, 18, 28));
+  txt("Direction/Camera: sensibilite 1 a 5", 38, 206, 0, C(150, 160, 190), BGC); txt("Gauche/Droite: changer", 38, 222, 0, C(150, 160, 190), BGC);
 }
 static void draw_ctrl(int sel, int cap) {
-  clear(); txt("COMMANDES", 115, 2, 1, C(230, 60, 50), C(15, 18, 28));
+  clear(); txt("COMMANDES", 115, 2, 1, ACC, BGC);
   int top = sel - 4; if (top < 0) top = 0; if (top > NA + 1 - 9) top = NA + 1 - 9;
   for (int i = 0; i < 9; i++) { int a = top + i; char s[48], *p = s; if (a > NA) break;
     if (a == NA) cat(s, "Restaurer les defauts"); else { p = cat(p, AN[a]); p = cat(p, ": "); cat(p, KN[bind[a]] ? KN[bind[a]] : "?"); if (cap && a == sel) cat(s, "  (appuie sur une touche)"); }
     row(s, 10, 24 + i * 21, 300, 19, a == sel); }
-  txt(cap ? "Retour: annuler" : "OK: changer  Retour: quitter", 10, 220, 0, C(150, 160, 190), C(15, 18, 28));
+  txt(cap ? "Retour: annuler" : "OK: changer  Retour: quitter", 10, 220, 0, C(150, 160, 190), BGC);
 }
 static int turboT, gi, ri; static float tscale = 1.f;
 #define QUICK_COUNT 22
@@ -851,7 +887,7 @@ static void draw_quick(int sel) {
   static const char *RN[3] = {"Seche", "Mouillee", "Glace"}, *GN[3] = {"Normale", "Lune", "Forte"};
   static const char *AI_MODE[3] = {"Circuit", "Suit joueur", "Patrouille"}, *AI_SPEED[5] = {"Tres lent", "Lent", "Normal", "Rapide", "Tres rapide"};
   static const char *CITY_PLAN[3] = {"Regulier", "Decale", "Canalise"}, *WEATHER[4] = {"Clair", "Pluie", "Brouillard", "Glace"};
-  eadk_display_push_rect_uniform((eadk_rect_t){40, 0, 240, 240}, C(15, 18, 28)); txt("OPTIONS RAPIDES", 108, 3, 0, C(255, 210, 80), C(15, 18, 28));
+  eadk_display_push_rect_uniform((eadk_rect_t){40, 0, 240, 240}, BGC); txt("OPTIONS RAPIDES", 108, 3, 0, C(255, 210, 80), BGC);
   int top = sel - 5; if (top < 0) top = 0; if (top > QUICK_COUNT - 12) top = QUICK_COUNT - 12;
   for (int line = 0; line < 12; line++) { int i = top + line; char s[40], *p = s; p = cat(p, QL[i]);
     if (i == 1) cat(p, turboT ? ": oui" : ": non"); else if (i == 10 && mapId != 3) cat(p, trafficEnabled ? ": oui (Ville)" : ": non (Ville)"); else if (i == 3) { p = cat(p, ": "); cat(p, VEH[cv].nm); } else if (i == 4) { p = cat(p, ": "); cat(p, ENG[ce].nm); }
@@ -868,22 +904,22 @@ static void draw_tutorial(void) {
   txt(text, 4, 225, 0, tutOk > 0 ? C(120, 255, 140) : C(255, 210, 80), C(10, 10, 14));
 }
 static void draw_dmg(void) {
-  for (int i = 0; i < LW * LH; i++) fb[i] = C(15, 18, 28);
+  for (int i = 0; i < LW * LH; i++) fb[i] = BGC;
   curZ = -1; draw_top(lw * 45 / 160, lh / 2, 20.f * lw / 160, 1); present(0);
   int zp[5]; zones(zp); const char *zn[5] = {"Avant", "Arriere", "Gauche", "Droite", "Toit"};
-  txt("DEGATS", 220, 6, 1, C(230, 60, 50), C(15, 18, 28));
-  for (int i = 0; i < 5; i++) { char s[24], *p = s; p = cat(p, zn[i]); p = cat(p, ": "); p = num(p, zp[i]); cat(p, "%"); txt(s, 190, 36 + i * 17, 0, zp[i] > 60 ? C(255, 90, 80) : (zp[i] > 25 ? C(255, 210, 80) : C(120, 220, 120)), C(15, 18, 28)); }
+  txt("DEGATS", 220, 6, 1, ACC, BGC);
+  for (int i = 0; i < 5; i++) { char s[24], *p = s; p = cat(p, zn[i]); p = cat(p, ": "); p = num(p, zp[i]); cat(p, "%"); txt(s, 190, 36 + i * 17, 0, zp[i] > 60 ? C(255, 90, 80) : (zp[i] > 25 ? C(255, 210, 80) : C(120, 220, 120)), BGC); }
   { char ln[28]; ln[0] = 0; char *p = ln; int y = 124, any = 0;
-    for (int g = 0; g < NG; g++) if (pAtt[g] <= 0) { any = 1; if ((p - ln) + (int)sizeof(PNAME[0]) > 0 && (p - ln) > 11) { txt(ln, 190, y, 0, C(255, 120, 100), C(15, 18, 28)); y += 14; p = ln; *p = 0; } p = cat(p, PNAME[g]); p = cat(p, " "); }
-    if (any) txt(ln, 190, y, 0, C(255, 120, 100), C(15, 18, 28)); else txt("Aucune piece perdue", 190, y, 0, C(120, 220, 120), C(15, 18, 28)); }
+    for (int g = 0; g < NG; g++) if (pAtt[g] <= 0) { any = 1; if ((p - ln) + (int)sizeof(PNAME[0]) > 0 && (p - ln) > 11) { txt(ln, 190, y, 0, C(255, 120, 100), BGC); y += 14; p = ln; *p = 0; } p = cat(p, PNAME[g]); p = cat(p, " "); }
+    if (any) txt(ln, 190, y, 0, C(255, 120, 100), BGC); else txt("Aucune piece perdue", 190, y, 0, C(120, 220, 120), BGC); }
   { const char *nm[4] = {"Rad ", "Res ", "Arb ", "Ess "}; float v[4] = {radHp, tankHp, shaftHp, fuel};
-    for (int i = 0; i < 4; i++) { char t[12], *q = t; q = cat(q, nm[i]); cat(q, ""); q = num(q, (int)(v[i] * 100.f + .5f)); *q = 0; txt(t, 2, 40 + i * 14, 0, comp_col(v[i]), C(15, 18, 28)); }
-    if (exploded) txt("BOOM!", 2, 100, 0, C(255, 120, 40), C(15, 18, 28)); else if (burning) txt("FEU!", 2, 100, 0, C(255, 120, 40), C(15, 18, 28)); }
+    for (int i = 0; i < 4; i++) { char t[12], *q = t; q = cat(q, nm[i]); cat(q, ""); q = num(q, (int)(v[i] * 100.f + .5f)); *q = 0; txt(t, 2, 40 + i * 14, 0, comp_col(v[i]), BGC); }
+    if (exploded) txt("BOOM!", 2, 100, 0, C(255, 120, 40), BGC); else if (burning) txt("FEU!", 2, 100, 0, C(255, 120, 40), BGC); }
   char s[24], *p = s;
-  int wl = 0; for (int w = 0; w < 4; w++) wl += wAtt[w] > 0; p = s; p = cat(p, "Roues: "); p = num(p, wl); cat(p, "/4"); txt(s, 190, 192, 0, 0xFFFF, C(15, 18, 28));
-  p = s; p = cat(p, "Total: "); p = num(p, (int)dmg); cat(p, "%"); txt(s, 190, 208, 0, C(255, 210, 80), C(15, 18, 28));
-  if (mapId == 2 && ct == 2) { p = s; p = cat(p, "SCORE "); num(p, score); txt(s, 6, 226, 1, C(255, 210, 80), C(15, 18, 28)); txt("OK : rejouer", 190, 226, 0, 0xFFFF, C(15, 18, 28)); }
-  else txt("Une touche pour revenir", 6, 226, 0, C(150, 160, 190), C(15, 18, 28));
+  int wl = 0; for (int w = 0; w < 4; w++) wl += wAtt[w] > 0; p = s; p = cat(p, "Roues: "); p = num(p, wl); cat(p, "/4"); txt(s, 190, 192, 0, 0xFFFF, BGC);
+  p = s; p = cat(p, "Total: "); p = num(p, (int)dmg); cat(p, "%"); txt(s, 190, 208, 0, C(255, 210, 80), BGC);
+  if (mapId == 2 && ct == 2) { p = s; p = cat(p, "SCORE "); num(p, score); txt(s, 6, 226, 1, C(255, 210, 80), BGC); txt("OK : rejouer", 190, 226, 0, 0xFFFF, BGC); }
+  else txt("Une touche pour revenir", 6, 226, 0, C(150, 160, 190), BGC);
 }
 static void hud(int kmh, int gear, int lap, int ms, int best) {
   char s[80], *p = s; p = num(p, kmh); p = cat(p, "km/h "); if (gear < 0) p = cat(p, "R"); else { p = cat(p, "G"); p = num(p, gear); }
@@ -911,20 +947,22 @@ int main(void) {
   gorb = TESTGO; gelev = TESTGE; gzoom = TESTGZ;
 #endif
 #endif
+  static int lastSt = -1;
   for (;;) {
+    if (st != lastSt) { if (st == S_MENU) { menu_init(); redraw = 1; } lastSt = st; }
     eadk_keyboard_state_t k = eadk_keyboard_scan();
     int U = pressed(k, eadk_key_up), D = pressed(k, eadk_key_down), L = pressed(k, eadk_key_left), R = pressed(k, eadk_key_right), O = pressed(k, eadk_key_ok), B = pressed(k, eadk_key_back);
     if (st == S_MENU) {
       if (redraw) { draw_menu(sel); redraw = 0; }
       if (U) { sel = (sel + 8) % 9; redraw = 1; } if (D) { sel = (sel + 1) % 9; redraw = 1; }
       if ((L || R || O) && sel >= 2 && sel <= 4) { int d = L ? -1 : 1; redraw = 1;
-        if (sel == 2) mapId = (mapId + 4 + d) % 4; else if (sel == 3) solid = (solid + 3 + d) % 3; else crashI = (crashI + 5 + d) % 5; }
+        if (sel == 2) mapId = (mapId + 4 + d) % 4; else if (sel == 3) solid = (solid + 3 + d) % 3; else crashI = (crashI + 5 + d) % 5; menu_init(); }
       else if (O) { if (sel == 0) { tutOn = 0; startpos(); st = S_GAME; lap = 1; best = 0; cp = 0; lapT = eadk_timing_millis(); last = lapT; acc = 0; eadk_display_push_rect_uniform(eadk_screen_rect, 0); }
         else if (sel == 1) { garage_car(); st = S_GARAGE; redraw = 1; } else if (sel == 5) { retS = S_MENU; sel = 0; st = S_SET; redraw = 1; }
         else if (sel == 6) { retS = S_MENU; sel = 0; cap = 0; st = S_CTRL; redraw = 1; }
         else if (sel == 7) { mapBak = mapId; mapId = 3; tutOn = 1; tutStep = tutFlag = tutOk = evDmg = evRepair = 0; yawO = hO = dO = 0; tHood = tDoor = tTrunk = oHood = oDoor = oTrunk = 0; startpos(); st = S_GAME; lap = 1; best = 0; cp = 0; lapT = eadk_timing_millis(); last = lapT; acc = 0; eadk_display_push_rect_uniform(eadk_screen_rect, 0); }
         else if (sel == 8) return 0; }
-      eadk_timing_msleep(30);
+      if (st == S_MENU) menu_bg();
     } else if (st == S_GARAGE) {
       if (redraw) { draw_garage(gsel, gview); redraw = 0; }
       if (gview) {                                       // free orbit with the arrow keys
@@ -1088,11 +1126,11 @@ int main(void) {
       if (B || bpress(k, A_QUICK)) { st = S_GAME; eadk_display_push_rect_uniform(eadk_screen_rect, 0); last = eadk_timing_millis(); acc = 0; }
       eadk_timing_msleep(30);
     } else {                                              // S_KEYS: key tester
-      if (redraw) { clear(); txt("TEST DES TOUCHES", 90, 8, 1, C(230, 60, 50), C(15, 18, 28)); txt("Appuie sur des touches. Retour: sortir", 30, 40, 0, C(150, 160, 190), C(15, 18, 28)); redraw = 2; }
+      if (redraw) { clear(); txt("TEST DES TOUCHES", 90, 8, 1, ACC, BGC); txt("Appuie sur des touches. Retour: sortir", 30, 40, 0, C(150, 160, 190), BGC); redraw = 2; }
       if (B) { st = S_SET; sel = 5; redraw = 1; }
       else if (k != pk || redraw == 2) {
-        eadk_display_push_rect_uniform((eadk_rect_t){0, 70, 320, 150}, C(15, 18, 28)); int line = 0, col = 0;
-        for (int key = 0; key < 53; key++) if (((k >> key) & 1) && KN[key]) { txt(KN[key], 20 + col * 100, 80 + line * 20, 0, C(255, 210, 80), C(15, 18, 28)); if (++col == 3) { col = 0; line++; } }
+        eadk_display_push_rect_uniform((eadk_rect_t){0, 70, 320, 150}, BGC); int line = 0, col = 0;
+        for (int key = 0; key < 53; key++) if (((k >> key) & 1) && KN[key]) { txt(KN[key], 20 + col * 100, 80 + line * 20, 0, C(255, 210, 80), BGC); if (++col == 3) { col = 0; line++; } }
         redraw = 3;
       }
       eadk_timing_msleep(30);

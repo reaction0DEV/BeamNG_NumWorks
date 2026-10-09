@@ -317,13 +317,17 @@ static void tire(Node *p, float fx, float fz, float nx, float ny, float nz, int 
   float ll = fsqrt(lx * lx + ly * ly + lz * lz) + 1e-4f; lx /= ll; ly /= ll; lz /= ll;
   float weatherGrip = weatherMode == 1 ? .72f : (weatherMode == 3 ? .48f : 1.f);
   float vl = p->vx * lx + p->vy * ly + p->vz * lz, lg = latG * gripF * weatherGrip;
+  { float spd = fsqrt(p->vx * p->vx + p->vz * p->vz), gf = 1.f;   // drift: the faster you go, the less the tyres hold (rear first)
+    if (spd > 16.f) { gf = 1.f / (1.f + (spd - 16.f) * .045f); if (gf < .22f) gf = .22f; }
+    if (p->t == 1 && (int)(p - n) < 16) gf *= .8f;
+    lg *= gf; }
   float dvm = lg * 3.2f * G * dt * 3.f, d = vl * .5f; if (d > dvm) d = dvm; if (d < -dvm) d = -dvm;   // grip is limited: the tire slides instead of tipping the car over
   p->vx -= lx * d * .3f; p->vy -= ly * d * .3f; p->vz -= lz * d * .3f;           // part of the grip acts at the tire...
   { float J = d / p->im * .7f; latX -= lx * J; latY -= ly * J; latZ -= lz * J; }  // ...the rest through the whole body (no tipping over)
   if (!drive) return;
   float vf = p->vx * tx + p->vy * ty + p->vz * tz;
-  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff;
-  if (thr != 0 && !(thr > 0 && vf > eV) && !(thr < 0 && vf < -10)) {
+  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * 1.8f * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff;
+  if (thr != 0 && !(thr < 0 && vf < -10)) {   // no top-speed cut-off
 #ifdef THRUSTBODY
     thrustAcc += thr * eA * dt * .25f;
 #else
@@ -410,7 +414,7 @@ static void step(float dt) {
   }
   for (int i = 0; i < nn; i++) {                         // safety net: a node can never leave the physically possible range
     Node *p = &n[i]; float v2 = p->vx * p->vx + p->vy * p->vy + p->vz * p->vz;
-    if (!(v2 == v2) || v2 > 90.f * 90.f) { float k = v2 == v2 ? 90.f / fsqrt(v2) : 0.f; p->vx *= k; p->vy *= k; p->vz *= k; if (!(p->x == p->x) || !(p->y == p->y) || !(p->z == p->z)) { p->x = n[4].x; p->y = n[4].y + 1.f; p->z = n[4].z; } }
+    if (!(v2 == v2) || v2 > 1000.f * 1000.f) { float k = v2 == v2 ? 1000.f / fsqrt(v2) : 0.f; p->vx *= k; p->vy *= k; p->vz *= k; if (!(p->x == p->x) || !(p->y == p->y) || !(p->z == p->z)) { p->x = n[4].x; p->y = n[4].y + 1.f; p->z = n[4].z; } }
   }
   if (thrustAcc != 0) for (int i = 0; i < NC; i++) { n[i].vx += hx * thrustAcc; n[i].vz += hz * thrustAcc; }
   if (latX != 0 || latY != 0 || latZ != 0) {
