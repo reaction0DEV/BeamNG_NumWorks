@@ -31,10 +31,22 @@ static void fx_reset(void) {
 }
 static const float SOLF[3] = {1.6f, 1.f, .65f};
 typedef struct { const char *nm; float sx, sy, sz, im, pw, gr; uint8_t r, g, b; } Veh;
-#define NV 5
+#define NV 16   // 0-3 de base, 4 = généré, 5+ = modèles ajoutés (VEH[NV] reste réservé au bot actif)
 static char genName[16] = "Gen #1";
 static Veh VEH[NV + 1] = {{"Berline",1,1,1,1,1,1,200,35,30},{"Sport",1.05f,.8f,1.12f,1.1f,1.15f,1.12f,40,90,210},
-  {"Pick-up",1.12f,1.25f,1.15f,.8f,.95f,.85f,230,170,30},{"Buggy",.8f,.85f,.7f,1.3f,1.1f,1.15f,60,180,70},{genName,1,1,1,1,1,1,150,150,150}};
+  {"Pick-up",1.12f,1.25f,1.15f,.8f,.95f,.85f,230,170,30},{"Buggy",.8f,.85f,.7f,1.3f,1.1f,1.15f,60,180,70},{genName,1,1,1,1,1,1,150,150,150},
+  // ---- modèles ajoutés : nom, largeur, hauteur, longueur, 1/masse, puissance, grip, couleur ----
+  {"Citadine",.85f,.95f,.8f,1.3f,.8f,1.f,245,245,245},
+  {"4x4",1.1f,1.3f,1.1f,.75f,1.05f,.95f,40,90,50},
+  {"SUV",1.12f,1.2f,1.15f,.78f,1.f,.9f,60,60,70},
+  {"Muscle",1.1f,.9f,1.2f,.9f,1.3f,.95f,20,20,25},
+  {"Van",1.15f,1.5f,1.35f,.65f,.85f,.8f,230,230,235},
+  {"Camion",1.25f,1.7f,1.6f,.65f,.8f,.75f,200,90,30},
+  {"Kart",.7f,.75f,.7f,1.45f,1.f,1.2f,240,60,60},
+  {"Rallye",1.f,.95f,1.f,1.05f,1.2f,1.2f,250,120,20},
+  {"Limousine",1.f,.95f,1.4f,.7f,.9f,.85f,15,15,18},
+  {"Dragster",.85f,.75f,1.35f,1.15f,1.35f,.7f,200,10,10},
+  {"Taxi",1.f,1.02f,1.05f,.95f,.95f,1.f,255,200,0}};
 static unsigned genSeed = 1, genState;
 static float gen_random(void) { genState = genState * 1664525u + 1013904223u; return (genState >> 8) / 16777215.f; }
 static void gen_car(unsigned seed) {
@@ -95,9 +107,20 @@ static float bump(float x, float c, float wl, float wr, float h) {
 #define TA 130.f
 #define TB 85.f
 #define WALLZ 60.f
-#define CITY_X_LIMIT 56.f
-#define CITY_Z_LIMIT 72.f
-static float city_height(int ix, int iz) { return 9.f + ((ix * 7 + iz * 11 + 200) & 3) * 4.f; }
+#define CITY_X_LIMIT 112.f
+#define CITY_Z_LIMIT 144.f
+#define CITY_NX 8
+#define CITY_NZ 8
+// 8 x 8 blocks, varied: 0 office, 1 tower (downtown), 2 low-rise, 3 park (no building)
+static unsigned city_hash(int ix, int iz) { unsigned v = (unsigned)(ix + 50) * 73856093u ^ (unsigned)(iz + 50) * 19349663u; v ^= v >> 13; v *= 0x5bd1e995u; v ^= v >> 15; return v; }
+static int city_kind(int ix, int iz) {
+  unsigned v = city_hash(ix, iz); int k = (int)(v % 10), central = ix >= -2 && ix <= 1 && iz >= -2 && iz <= 1;
+  if (k == 0) return 3; if (k <= 2) return 2; if (central && k <= 6) return 1; return 0;
+}
+static float city_height(int ix, int iz) {
+  unsigned v = city_hash(ix, iz) >> 8; int k = city_kind(ix, iz);
+  if (k == 3) return 0.f; if (k == 2) return 5.f + (v & 3) * 1.5f; if (k == 1) return 30.f + (v % 5) * 6.f; return 12.f + (v & 3) * 4.f;
+}
 static int city_round(float v) { return (int)(v + (v >= 0 ? .5f : -.5f)); }
 static void city_center(int ix, int iz, float *x, float *z) {
   *x = ix * 28.f + 14.f; *z = iz * 36.f + 18.f;
@@ -105,8 +128,8 @@ static void city_center(int ix, int iz, float *x, float *z) {
   else if (cityPlan == 2) *z += (ix & 1) ? 5.f : -5.f;
 }
 static void city_nearest(float x, float z, int *ix, int *iz) {
-  float best = 1e9f; *ix = city_round((x - 14.f) / 28.f); *iz = city_round((z - 18.f) / 36.f);
-  for (int a = -3; a <= 3; a++) for (int b = -3; b <= 3; b++) {
+  float best = 1e9f; int ea = city_round((x - 14.f) / 28.f), eb = city_round((z - 18.f) / 36.f); *ix = ea; *iz = eb;
+  for (int a = ea - 1; a <= ea + 1; a++) for (int b = eb - 1; b <= eb + 1; b++) {
     float cx, cz; city_center(a, b, &cx, &cz); float dx = x - cx, dz = z - cz, d = dx * dx + dz * dz;
     if (d < best) { best = d; *ix = a; *iz = b; }
   }
@@ -114,7 +137,7 @@ static void city_nearest(float x, float z, int *ix, int *iz) {
 static int city_push_out(float *x, float *z, float r) {   // projects a ground point out of every building footprint
   int ix0, iz0, moved = 0; city_nearest(*x, *z, &ix0, &iz0);
   for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) for (int iz = iz0 - 1; iz <= iz0 + 1; iz++) {
-    float bx, bz; city_center(ix, iz, &bx, &bz);
+    float bx, bz; if (city_height(ix, iz) <= 0.f) continue; city_center(ix, iz, &bx, &bz);
     float dx = *x - bx, dz = *z - bz, px = 8.5f + r - (dx < 0 ? -dx : dx), pz = 11.f + r - (dz < 0 ? -dz : dz);
     if (px <= 0 || pz <= 0) continue; moved = 1;
     if (px < pz) *x = bx + (dx >= 0 ? 8.5f + r : -(8.5f + r)); else *z = bz + (dz >= 0 ? 11.f + r : -(11.f + r));
@@ -123,7 +146,7 @@ static int city_push_out(float *x, float *z, float r) {   // projects a ground p
 }
 static float gh(float x, float z) {
   float h, ft = 0, ax = x < 0 ? -x : x;
-  if (mapId == 3) { gdist = ax; gfeat = 0; return 0; }
+  if (mapId == 3 || mapId == 4) { gdist = ax; gfeat = 0; return 0; }   // 4 = carte vide (sol plat)
   if (mapId == 0) {
     float rho = fsqrt(x * x / (TA * TA) + z * z / (TB * TB)), g2 = fsqrt(x * x / (TA * TA * TA * TA) + z * z / (TB * TB * TB * TB)) + 1e-6f;
     float d = rho < .15f ? -60.f : (rho - 1.f) * rho / g2, ad = d < 0 ? -d : d;
@@ -145,10 +168,16 @@ static float gh(float x, float z) {
 static void heading(float *hx, float *hz);
 static void traffic_update(float dt);
 static void bots_clear(void);
+static void rail_box(int mode, float *x0, float *x1, float *z0, float *z1) {   // 0 inner ring, 2 patrol block, 3 big outer ring
+  if (mode == 2) { *x0 = -26.3f; *x1 = -1.7f; *z0 = 1.7f; *z1 = 34.3f; }
+  else if (mode == 3) { *x0 = -82.3f; *x1 = 82.3f; *z0 = -106.3f; *z1 = 106.3f; }
+  else { *x0 = -26.3f; *x1 = 26.3f; *z0 = -34.3f; *z1 = 34.3f; }
+}
+static int rail_mode_of(int i) { return trafficBehavior == 0 ? ((i & 1) ? 3 : 0) : trafficBehavior; }
 static void traffic_reset(void) {
   bots_clear(); policeCar.bot = 0;
   static const float SPEED[5] = {4.5f, 7.f, 9.f, 12.f, 15.f};
-  for (int i = 0; i < MAX_AI; i++) { traffic[i].phase = i * ((trafficBehavior == 2 ? 114.f : 242.f) / (trafficCount > 0 ? trafficCount : 1)); traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; traffic[i].bot = 0; }
+  for (int i = 0; i < MAX_AI; i++) { { float rx0, rx1, rz0, rz1; rail_box(rail_mode_of(i), &rx0, &rx1, &rz0, &rz1); float loop = 2.f * ((rx1 - rx0) + (rz1 - rz0)); int per = trafficBehavior == 0 ? (trafficCount + 1) / 2 : trafficCount, kk = trafficBehavior == 0 ? i / 2 : i; traffic[i].phase = kk * loop / (per > 0 ? per : 1); } traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; traffic[i].bot = 0; }
   policeCar.x = (n[4].x + n[5].x) * .5f; policeCar.z = (n[4].z + n[5].z) * .5f - 12.f; policeCar.hx = 0; policeCar.hz = 1;
   traffic_update(0.f);
 }
@@ -166,9 +195,7 @@ static void traffic_update(float dt) {
       float blend = dt <= 0 ? 1.f : dt * 1.8f; if (blend > .12f) blend = .12f;
       car->x += (tx - car->x) * blend; car->z += (tz - car->z) * blend; car->hx = hx; car->hz = hz; continue;
     }
-    float x0, x1, z0, z1;                                   // lane rectangle, inset from the road centre lines
-    if (trafficBehavior == 2) { x0 = -26.3f; x1 = -1.7f; z0 = 1.7f; z1 = 34.3f; }       // patrol: block around the start
-    else { x0 = -26.3f; x1 = 26.3f; z0 = -34.3f; z1 = 34.3f; }                          // circuit: inner ring road
+    float x0, x1, z0, z1; rail_box(rail_mode_of(i), &x0, &x1, &z0, &z1);   // lane rectangle, inset from the road centre lines
     float W = x1 - x0, Hh = z1 - z0, loop = 2.f * (W + Hh);
     car->phase += car->speed * (trafficBehavior == 2 ? .7f : 1.f) * dt; while (car->phase >= loop) car->phase -= loop;
     float p = car->phase;
@@ -397,7 +424,7 @@ static void step(float dt) {
     int ix0, iz0; city_nearest(p->x, p->z, &ix0, &iz0);
     for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) for (int iz = iz0 - 1; iz <= iz0 + 1; iz++) {
       float bx, bz; city_center(ix, iz, &bx, &bz); float height = city_height(ix, iz);
-      if (p->y - p->r >= height) continue;
+      if (height <= 0.f || p->y - p->r >= height) continue;
       float px = 8.5f + p->r - (p->x > bx ? p->x - bx : bx - p->x), pz = 11.f + p->r - (p->z > bz ? p->z - bz : bz - p->z);
       if (px <= 0 || pz <= 0) continue;
       // soft contact: the node is pushed out a few centimetres per step (never teleported), so the beams
@@ -579,9 +606,6 @@ static int bots_active(void) { for (int i = 0; i < MAX_PHYS; i++) if (bots[i].us
 static float absf_(float v) { return v < 0 ? -v : v; }
 
 // rail geometry shared with traffic_update(): 0 = circuit (inner ring road), 2 = patrol (block around the start)
-static void rail_box(int mode, float *x0, float *x1, float *z0, float *z1) {
-  if (mode == 2) { *x0 = -26.3f; *x1 = -1.7f; *z0 = 1.7f; *z1 = 34.3f; } else { *x0 = -26.3f; *x1 = 26.3f; *z0 = -34.3f; *z1 = 34.3f; }
-}
 static void rail_point(int mode, float p, float *x, float *z) {
   float x0, x1, z0, z1; rail_box(mode, &x0, &x1, &z0, &z1); float W = x1 - x0, H = z1 - z0, loop = 2.f * (W + H);
   while (p >= loop) p -= loop; while (p < 0.f) p += loop;
@@ -612,7 +636,7 @@ static void bot_ai(Bot *b, float dt, float plx, float plz, float plhx, float plh
     if (tz < -CITY_Z_LIMIT + 3.f) tz = -CITY_Z_LIMIT + 3.f; if (tz > CITY_Z_LIMIT - 3.f) tz = CITY_Z_LIMIT - 3.f;
     float dx = tx - x, dz = tz - z, d = fsqrt(dx * dx + dz * dz); vt = d * 1.3f; if (vt > 16.f) vt = 16.f; if (d < 2.f) vt = 0.f;
   } else {
-    int mode = trafficBehavior; float ph = rail_phase(mode, x, z), look = 6.f + (vf > 0 ? vf : 0) * .6f;
+    int mode = rail_mode_of(b->src); float ph = rail_phase(mode, x, z), look = 6.f + (vf > 0 ? vf : 0) * .6f;
     rail_point(mode, ph + look, &tx, &tz); vt = traffic[b->src].speed * (mode == 2 ? .7f : 1.f);
     float fx2, fz2; rail_point(mode, ph + look + 9.f, &fx2, &fz2);          // what is coming after: brake before the bend, not in it
     float ax = fx2 - x, az = fz2 - z, al = fsqrt(ax * ax + az * az) + 1e-3f, ar = (ax * rx + az * rz) / al;
@@ -666,7 +690,7 @@ static void bot_spawn(int slot, int src, float x, float z, float hx, float hz, f
 }
 static void bot_release(Bot *b) {
   TrafficCar *car = b->src == PSRC ? &policeCar : &traffic[b->src];
-  if (b->src != PSRC && trafficBehavior != 1) car->phase = rail_phase(trafficBehavior, car->x, car->z);   // back on the nearest rail point
+  if (b->src != PSRC && trafficBehavior != 1) car->phase = rail_phase(rail_mode_of(b->src), car->x, car->z);   // back on the nearest rail point
   car->bot = 0; b->used = 0;
 }
 
