@@ -11,7 +11,7 @@ static int lw = 160, lh = 112, hor = 44; static float foc = 130.f, zmax = 72.f, 
 #define HOR hor
 #define C(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
 enum { S_MENU, S_GARAGE, S_GAME, S_PAUSE, S_DMG, S_SET, S_CTRL, S_KEYS, S_QUICK };
-static uint16_t fb[MAXW * MAXH], buf[320 * 16]; static uint8_t zb[MAXW * MAXH], xmap[320];
+static uint16_t fb[MAXW * MAXH], buf[320 * 8]; static uint8_t zb[MAXW * MAXH], xmap[320];
 static int structure, CXc = 80, curZ = -1, showTop = 1, crashI = 2, camInterior;
 typedef struct { float x, z, h; } CityBlock;
 static CityBlock cityBlocks[16];
@@ -690,9 +690,9 @@ static void zones(int *zp) {
 }
 static void present(int xd0) {
   int w = 320 - xd0;
-  for (int by = 0; by < 224; by += 16) {
-    for (int r = 0; r < 16; r++) { const uint16_t *src = &fb[((by + r) * lh / 224) * lw]; uint16_t *d = &buf[r * w]; for (int x = 0; x < w; x++) d[x] = src[xmap[xd0 + x]]; }
-    eadk_display_push_rect((eadk_rect_t){xd0, by, w, 16}, buf);
+  for (int by = 0; by < 224; by += 8) {
+    for (int r = 0; r < 8; r++) { const uint16_t *src = &fb[((by + r) * lh / 224) * lw]; uint16_t *d = &buf[r * w]; for (int x = 0; x < w; x++) d[x] = src[xmap[xd0 + x]]; }
+    eadk_display_push_rect((eadk_rect_t){xd0, by, w, 8}, buf);
   }
 }
 static void draw_bot(int slot) {          // a physical bot is drawn by the very same car() and draw_fx() as the player's car
