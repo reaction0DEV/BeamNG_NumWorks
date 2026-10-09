@@ -30,7 +30,7 @@ static void fx_reset(void) {
   flashT = 0.f; jolt = vcmx = vcmz = steamI = 0.f; burning = exploded = fxPrimed = 0;
 }
 static const float SOLF[3] = {1.6f, 1.f, .65f};
-typedef struct { const char *nm; float sx, sy, sz, im, pw, gr; uint8_t r, g, b; } Veh;
+typedef struct { const char *nm; float sx, sy, sz, im, pw, gr; uint8_t r, g, b; float th; } Veh;
 #define NV 16   // 0-3 de base, 4 = généré, 5+ = modèles ajoutés (VEH[NV] reste réservé au bot actif)
 static char genName[16] = "Gen #1";
 static Veh VEH[NV + 1] = {{"Berline",1,1,1,1,1,1,200,35,30},{"Sport",1.05f,.8f,1.12f,1.1f,1.15f,1.12f,40,90,210},
@@ -45,7 +45,7 @@ static Veh VEH[NV + 1] = {{"Berline",1,1,1,1,1,1,200,35,30},{"Sport",1.05f,.8f,1
   {"Kart",.7f,.75f,.7f,1.45f,1.f,1.2f,240,60,60},
   {"Rallye",1.f,.95f,1.f,1.05f,1.2f,1.2f,250,120,20},
   {"Limousine",1.f,.95f,1.4f,.7f,.9f,.85f,15,15,18},
-  {"Dragster",.85f,.75f,1.35f,1.15f,1.35f,.7f,200,10,10},
+  {"Dragster",.85f,.75f,1.35f,1.15f,1.35f,.7f,200,10,10,1.f},
   {"Taxi",1.f,1.02f,1.05f,.95f,.95f,1.f,255,200,0}};
 static unsigned genSeed = 1, genState;
 static float gen_random(void) { genState = genState * 1664525u + 1013904223u; return (genState >> 8) / 16777215.f; }
@@ -64,6 +64,8 @@ static void gen_car(unsigned seed) {
   v->nm = genName;
 }
 typedef struct { const char *nm; float r, gr, im; uint8_t cr, cg, cb; } Whl;
+
+
 static const Whl WHL[4] = {{"Route",.36f,.25f,.4f,170,170,175},{"Sport",.34f,.34f,.45f,230,200,60},{"Tout-terrain",.43f,.2f,.33f,90,90,95},{"Mini",.27f,.3f,.5f,220,60,60}};
 typedef struct { const char *nm; float k, c; } Sus;
 static const Sus SUS[4] = {{"Souple",3500,45},{"Normale",5000,60},{"Ferme",8000,80},{"Course",12000,100}};

@@ -58,7 +58,7 @@ static void terrain(int xl) {
       int sy = (int)(HOR + (camy - h) * FOC / z); if (sy < 0) sy = 0;
       if (sy >= top[i]) continue;
       float ad = gdist < 0 ? -gdist : gdist; int r, g, b, ck = ((int)(X * .5f + 1000) ^ (int)(Z * .5f + 1000)) & 1, st = (int)((X + Z) * .5f + 1000) & 1;
-      if (mapId == 4) { r = g = b = 255; }                 // carte vide : sol blanc uni
+      if (mapId == 4) { int gx = (int)((X + 2000.f) * .5f), gz = (int)((Z + 2000.f) * .5f); r = g = b = ((gx + gz) & 1) ? 255 : 228; }
       else if (mapId == 3) {
         if (X < -CITY_X_LIMIT || X > CITY_X_LIMIT || Z < -CITY_Z_LIMIT || Z > CITY_Z_LIMIT) { r = 48 + ck * 5; g = 105 + ck * 7; b = 51; }
         else {
@@ -233,14 +233,16 @@ static const Bx SYSB[] = {
   {0,1,0.f,.78f,.56f,.86f,-1.92f,-1.42f,52,56,64},{0,1,-.01f,.79f,.56f,.88f,-1.74f,-1.7f,28,28,32},{0,1,-.01f,.79f,.56f,.88f,-1.6f,-1.56f,28,28,32},{0,1,.66f,.72f,.86f,.97f,-1.66f,-1.6f,26,26,30},
   {0,6,-.1f,.82f,.56f,.568f,-1.42f,-1.3f,210,160,30},
   {0,7,-.045f,.045f,.3f,.37f,-1.3f,.85f,64,64,70},{0,7,-.08f,.08f,.28f,.4f,.78f,.9f,95,95,100},{0,7,-.08f,.08f,.28f,.4f,-1.42f,-1.3f,95,95,100},{0,7,-.24f,.24f,.26f,.52f,-1.46f,-1.16f,88,90,98},
-  {0,7,-1.f,1.f,.32f,.36f,-1.33f,-1.27f,56,56,62},{0,7,-1.f,1.f,.32f,.37f,1.27f,1.33f,56,56,62},{0,7,.38f,.46f,.33f,.39f,-2.f,.7f,70,60,55},{0,7,.3f,.54f,.3f,.48f,-1.9f,-1.45f,80,76,72}};
+  {0,7,-1.f,1.f,.32f,.36f,-1.33f,-1.27f,56,56,62},{0,7,-1.f,1.f,.32f,.37f,1.27f,1.33f,56,56,62},{0,7,.38f,.46f,.33f,.39f,-2.f,.7f,70,60,55},{0,7,.3f,.54f,.3f,.48f,-1.9f,-1.45f,80,76,72},
+  {0,8,-.58f,-.28f,.4f,.72f,-2.7f,-2.28f,72,76,88},{0,8,.28f,.58f,.4f,.72f,-2.7f,-2.28f,72,76,88},       // tuyeres des propulseurs (voiture-fusee)
+  {0,8,-.5f,-.36f,.46f,.66f,-2.72f,-2.69f,255,150,40},{0,8,.36f,.5f,.46f,.66f,-2.72f,-2.69f,255,150,40}};
 #define NSB ((int)(sizeof(SYSB) / sizeof(SYSB[0])))
 static const Bx *bx_at(int i) { return i < NBX ? &BXS[i] : &SYSB[i - NBX]; }
 static int bx_show(const Bx *B, int bayOpen, int trunkOpen) {
   if (camInterior) return B->cond == 0;   // first-person: cabin only, no engine bay / trunk / underbody
   switch (B->cond) {
     case 1: return trunkOpen; case 2: return bayOpen; case 3: return bayOpen || pAtt[7] <= 0; case 4: return ce == 3 && (bayOpen || pAtt[7] <= 0);
-    case 5: return bayOpen && radHp < .6f; case 6: return trunkOpen && tankHp < .55f; case 7: return !camInterior && camy - n[4].y < 1.9f;
+    case 5: return bayOpen && radHp < .6f; case 6: return trunkOpen && tankHp < .55f; case 7: return !camInterior && camy - n[4].y < 1.9f; case 8: return VEH[cv].th > 0.f;
     default: return 1;
   }
 }
@@ -396,7 +398,7 @@ static void car(void) {
     for (int i = 0; i < nbc; i++) if (bm[i].f != 2 && bm[i].o == 0 && bm[i].f != 3) { float d = (bm[i].l0 - bm[i].lr) / bm[i].lr; d = (d < 0 ? -d : d) * 12; if (d > 1) d = 1; float x0, y0, x1, y1;
       if (proj(PX[bm[i].a], PY[bm[i].a], PZ[bm[i].a], &x0, &y0) && proj(PX[bm[i].b], PY[bm[i].b], PZ[bm[i].b], &x1, &y1)) line((int)x0, (int)y0, (int)x1, (int)y1, C(255, 255 - (int)(d * 230), 255 - (int)(d * 255))); }
     float hx_, hz_; heading(&hx_, &hz_); for (int w = 14; w < 18; w++) { float ax = hz_, az = -hx_; wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(WHL[cw].cr, WHL[cw].cg, WHL[cw].cb)); }
-    for (int b = NBX; b < NBX + NSB; b++) drawbx(b);                      // x-ray: radiator, tank, gearbox, driveshaft...
+    for (int b = NBX; b < NBX + NSB; b++) { if (bx_at(b)->cond == 8 && VEH[cv].th <= 0.f) continue; drawbx(b); }                   // x-ray: radiator, tank, gearbox, driveshaft...
     return;
   }
   float hx_, hz_, ccx = 0, ccz = 0; heading(&hx_, &hz_); for (int i = 0; i < 22; i++) { ccx += n[i].x / 22; ccz += n[i].z / 22; }
@@ -445,9 +447,20 @@ static void fire_src(float wx, float wy, float wz, float k, int seed) {      // 
     puff(wx + fsin(i * 12.9f + seed) * .4f * fl, wy + ph * (.9f + k * .9f), wz + fsin(i * 7.7f + 2.f + seed) * .4f * fl, r, c);
   }
 }
+static void draw_jets(void) {                      // flammes des propulseurs : deux jets derriere les tuyeres
+  float x, y, z;
+  for (int s = -1; s <= 1; s += 2) for (int i = 0; i < 9; i++) {
+    float ph = i / 8.f, fl = 1.f + .3f * fsin(fxClock * 45.f + i * 1.7f + s * 2.f), len = ph * 3.4f * fl;
+    uint16_t c = ph < .2f ? C(255, 250, 220) : (ph < .5f ? C(255, 190, 70) : (ph < .8f ? C(255, 110, 35) : C(210, 60, 30)));
+    fpt(0, s * .43f + fsin(fxClock * 31.f + i * 2.3f + s) * .04f * ph, .56f, -2.75f - len, &x, &y, &z);
+    puff(x, y, z, (.2f - ph * .13f) * fl, c);
+  }
+}
 static void draw_fx(void) {
-  if (!burning && steamI <= 0.f && boomT > 2.f) return;
+  int jet = VEH[cv].th > 0.f && turbo && fuel > .005f && !exploded;
+  if (!jet && !burning && steamI <= 0.f && boomT > 2.f) return;
   curZ = -1; blendA = 0; float x, y, z;
+  if (jet) draw_jets();
   if (steamI > 0.f && !burning) { fpt(0, 0.f, .85f, 1.7f, &x, &y, &z);                    // coolant steam from the radiator
     for (int i = 0; i < 8; i++) { float ph = fxClock * .8f + i * .125f; ph -= (int)ph; int g = 235 - (int)(ph * 70);
       puff(x + fsin(i * 5.1f) * .35f, y + ph * 1.5f, z + fsin(i * 3.7f) * .35f, (.1f + ph * .3f) * (.5f + steamI * .5f), C(g, g, g + 6 > 255 ? 255 : g + 6)); } }
@@ -1000,7 +1013,7 @@ static void draw_dmg(void) {
 }
 static void hud(int kmh, int gear, int lap, int ms, int best) {
   char s[80], *p = s; p = num(p, kmh); p = cat(p, "km/h "); if (gear < 0) p = cat(p, "R"); else { p = cat(p, "G"); p = num(p, gear); }
-  p = cat(p, " Deg "); p = num(p, (int)dmg); p = cat(p, "%"); if (turbo) p = cat(p, " TURBO");
+  p = cat(p, " Deg "); p = num(p, (int)dmg); p = cat(p, "%"); if (turbo) p = cat(p, VEH[cv].th > 0.f ? " PROPULSEURS" : " TURBO");
   if (exploded) p = cat(p, " BOOM!"); else if (burning) p = cat(p, " FEU!"); else if (tankHp < .6f && fuel > .01f) p = cat(p, " FUITE");
   if (engTemp > 1.f && !burning) p = cat(p, " TEMP!"); if (fuel < .12f && !burning) p = cat(p, " ESS");
   if (mapId == 0) { p = cat(p, " T"); p = num(p, lap); p = cat(p, " "); p = num(p, ms / 60000); p = cat(p, ":"); int sc = ms / 1000 % 60; if (sc < 10) p = cat(p, "0"); p = num(p, sc); p = cat(p, "."); p = num(p, ms / 100 % 10);
