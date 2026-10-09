@@ -200,14 +200,15 @@ static void fpt(int fr, float a, float b, float c, float *x, float *y, float *z)
   *x = PX[i0] + a * ex + b * ux + c * fx; *y = PY[i0] + a * ey + b * uy + c * fy; *z = PZ[i0] + a * ez + b * uz + c * fz;
 }
 typedef struct { uint8_t fr, cond; float a0, a1, b0, b1, c0, c1; uint8_t r, g, b; } Bx;
-// cond: 0 always, 1 trunk visible, 2 engine bay visible, 3 engine visible, 4 turbo only
+// cond: 0 always, 1 trunk visible, 2 engine bay visible, 3 engine visible, 4 turbo only,
+//       5 bay visible + radiator leaking, 6 trunk visible + tank leaking, 7 underbody (camera low)
 static const Bx BXS[] = {
   {0,0,-.82f,.82f,.7f,.98f,.5f,.8f,52,50,58},{0,0,-.62f,-.3f,.9f,.95f,.4f,.52f,30,30,34},{0,0,-.48f,-.44f,.78f,.9f,.45f,.6f,30,30,34},{0,0,-.1f,.1f,.45f,.72f,-.3f,.55f,55,55,62},
   {0,0,-.8f,.8f,.45f,.62f,-1.f,-.45f,70,68,76},{0,0,-.8f,.8f,.62f,1.1f,-1.08f,-.95f,70,68,76},{0,0,-.85f,.85f,.38f,.44f,-1.1f,.8f,48,46,52},
   {0,1,-.82f,.82f,.5f,.56f,-1.98f,-1.3f,60,58,60},{0,1,-.88f,-.82f,.56f,.95f,-1.98f,-1.3f,70,70,74},{0,1,.82f,.88f,.56f,.95f,-1.98f,-1.3f,70,70,74},{0,1,-.82f,.82f,.56f,.98f,-1.34f,-1.28f,66,64,70},
-  {0,1,-.38f,.38f,.56f,.7f,-1.85f,-1.45f,30,30,34},{0,1,.1f,.72f,.56f,.86f,-1.9f,-1.55f,140,64,40},{0,1,-.82f,.82f,.56f,.95f,-1.99f,-1.93f,80,80,86},
+  {0,1,-.8f,-.12f,.56f,.68f,-1.88f,-1.42f,30,30,34},{0,1,-.78f,-.42f,.68f,.8f,-1.8f,-1.56f,140,64,40},{0,1,-.82f,.82f,.56f,.95f,-1.99f,-1.93f,80,80,86},
   {0,2,-.85f,.85f,.36f,.4f,.8f,2.05f,50,50,55},{0,2,-.9f,-.85f,.4f,.88f,.8f,2.05f,64,64,70},{0,2,.85f,.9f,.4f,.88f,.8f,2.05f,64,64,70},{0,2,-.85f,.85f,.4f,.95f,.76f,.82f,58,58,64},
-  {0,2,-.7f,.7f,.42f,.85f,1.95f,2.02f,35,35,40},{0,2,.45f,.8f,.4f,.62f,1.55f,1.8f,25,30,60},{0,2,-.8f,-.6f,.4f,.55f,1.3f,1.5f,50,90,200},
+  {0,2,.45f,.8f,.4f,.62f,1.55f,1.8f,25,30,60},{0,2,-.8f,-.6f,.4f,.55f,1.3f,1.5f,50,90,200},
   {1,3,0,1,0,.62f,0,1,0,0,0},{1,3,.08f,.92f,.62f,.82f,.1f,.9f,170,170,180},{1,3,.3f,.7f,.82f,1.f,.2f,.75f,95,95,100},{1,3,.15f,.4f,.15f,.4f,1.f,1.1f,200,200,205},
   {1,3,.6f,.9f,.1f,.4f,1.f,1.08f,40,40,44},{1,3,1.f,1.1f,.1f,.5f,.1f,.9f,150,80,40},{1,4,-.4f,0,.15f,.5f,.2f,.6f,230,90,40},
   {1,3,.1f,.43f,.2f,.58f,.15f,.88f,125,130,138},{1,3,.57f,.9f,.2f,.58f,.15f,.88f,125,130,138},
@@ -215,6 +216,26 @@ static const Bx BXS[] = {
   {1,3,.05f,.14f,.14f,.28f,.22f,.82f,205,135,55},{1,3,.86f,.95f,.14f,.28f,.22f,.82f,205,135,55},
   {2,0,0,1,0,.28f,0,1,45,45,55},{3,0,0,1,0,.28f,0,1,45,45,55},{2,0,0,1,.28f,1.35f,-.35f,.1f,50,50,60},{3,0,0,1,.28f,1.35f,-.35f,.1f,50,50,60},{2,0,.25f,.75f,1.35f,1.7f,-.3f,.05f,45,45,55},{3,0,.25f,.75f,1.35f,1.7f,-.3f,.05f,45,45,55}};
 #define NBX ((int)(sizeof(BXS) / sizeof(BXS[0])))
+// vehicle systems: radiator + fan + hoses (bay), fuel tank (trunk), gearbox, driveshaft / differential / axles / exhaust (underbody)
+static const Bx SYSB[] = {
+  {0,2,-.68f,.68f,.46f,.86f,1.93f,2.0f,100,106,116},{0,2,-.68f,.68f,.52f,.54f,2.0f,2.012f,22,24,28},{0,2,-.68f,.68f,.64f,.66f,2.0f,2.012f,22,24,28},{0,2,-.68f,.68f,.76f,.78f,2.0f,2.012f,22,24,28},
+  {0,2,-.7f,.7f,.86f,.92f,1.92f,2.01f,38,40,46},{0,2,.5f,.62f,.92f,.99f,1.94f,2.0f,150,36,36},{0,2,-.7f,.7f,.4f,.46f,1.92f,2.01f,38,40,46},{0,2,.52f,.62f,.78f,.88f,1.55f,1.95f,16,16,18},{0,2,-.62f,-.52f,.42f,.52f,1.6f,1.95f,16,16,18},
+  {0,2,-.3f,.3f,.62f,.68f,1.88f,1.915f,40,40,46},{0,2,-.03f,.03f,.42f,.88f,1.88f,1.915f,40,40,46},{0,2,-.07f,.07f,.6f,.7f,1.86f,1.92f,90,90,96},
+  {0,2,.62f,.66f,.4f,.44f,.82f,1.95f,60,45,25},{0,2,.58f,.7f,.4f,.54f,1.2f,1.4f,80,80,86},{1,3,.2f,.8f,.12f,.62f,-.28f,0.f,75,78,86},
+  {0,5,-.5f,.5f,.396f,.404f,1.4f,2.0f,40,210,90},
+  {0,1,0.f,.78f,.56f,.86f,-1.92f,-1.42f,52,56,64},{0,1,-.01f,.79f,.56f,.88f,-1.74f,-1.7f,28,28,32},{0,1,-.01f,.79f,.56f,.88f,-1.6f,-1.56f,28,28,32},{0,1,.66f,.72f,.86f,.97f,-1.66f,-1.6f,26,26,30},
+  {0,6,-.1f,.82f,.56f,.568f,-1.42f,-1.3f,210,160,30},
+  {0,7,-.045f,.045f,.3f,.37f,-1.3f,.85f,64,64,70},{0,7,-.08f,.08f,.28f,.4f,.78f,.9f,95,95,100},{0,7,-.08f,.08f,.28f,.4f,-1.42f,-1.3f,95,95,100},{0,7,-.24f,.24f,.26f,.52f,-1.46f,-1.16f,88,90,98},
+  {0,7,-1.f,1.f,.32f,.36f,-1.33f,-1.27f,56,56,62},{0,7,-1.f,1.f,.32f,.37f,1.27f,1.33f,56,56,62},{0,7,.38f,.46f,.33f,.39f,-2.f,.7f,70,60,55},{0,7,.3f,.54f,.3f,.48f,-1.9f,-1.45f,80,76,72}};
+#define NSB ((int)(sizeof(SYSB) / sizeof(SYSB[0])))
+static const Bx *bx_at(int i) { return i < NBX ? &BXS[i] : &SYSB[i - NBX]; }
+static int bx_show(const Bx *B, int bayOpen, int trunkOpen) {
+  switch (B->cond) {
+    case 1: return trunkOpen; case 2: return bayOpen; case 3: return bayOpen || pAtt[7] <= 0; case 4: return ce == 3 && (bayOpen || pAtt[7] <= 0);
+    case 5: return bayOpen && radHp < .6f; case 6: return trunkOpen && tankHp < .55f; case 7: return !camInterior && camy - n[4].y < 1.9f;
+    default: return 1;
+  }
+}
 static float gx[64], gy[64], gz3[64], g3x[64], g3y[64], g3z[64];
 static const uint8_t HULLS = 0;
 // draw one patch; pass 0 = glass of far-side patches, 2 = opaque cells, 3 = glass cells of near patches
@@ -255,7 +276,9 @@ static void drawpat(int pi, const Pat *p, int pass, int facing, float cxm) {
     for (int v = 0; v < count; v++) { float dx = wx[v] - camx, dz = wz[v] - camz; xs[v] = CXc + (dx * camhz - dz * camhx) / wd[v] * FOC; ys[v] = HOR - (wy[v] - camy) / wd[v] * FOC; }
     if (!facing && p->two && !glass) m = M_INNER;
     uint16_t col = matcol(m, sh, (m == M_BODY || m == M_GLASS || m == M_CHROME) ? spec : 0, dk, V);
-    if (glass) { blendA = 150; polyn(xs, ys, count, col); blendA = 0; } else polyn(xs, ys, count, col);
+    if (glass) { blendA = 150; polyn(xs, ys, count, col); blendA = 0; }
+    else if (p->kind == K_HOOD && oHood > .12f && pAtt[0] > 0) { blendA = 100; polyn(xs, ys, count, col); blendA = 0; }   // open hood: see-through
+    else polyn(xs, ys, count, col);
   }
   if (pass != 2 && p->kind == K_WIN && p->grp == 6 && (pAtt[6] < pAtt0[6] || dmg > 40)) {   // cracked windshield
     int lx[8] = {0, nu, 0, nu, nu / 2, nu / 2, 0, nu}, ly[8] = {0, 0, nv, nv, 0, nv, nv / 2, nv / 2}; int ck = (nv / 2) * (nu + 1) + nu / 2;
@@ -263,7 +286,7 @@ static void drawpat(int pi, const Pat *p, int pass, int facing, float cxm) {
   }
 }
 static void drawbx(int bi) {
-  const Bx *B = &BXS[bi]; float x[8], y[8], z[8], zz[8]; int any = 0;
+  const Bx *B = bx_at(bi); float x[8], y[8], z[8], zz[8]; int any = 0;
   for (int i = 0; i < 8; i++) { fpt(B->fr, (i & 1) ? B->a1 : B->a0, ((i >> 1) & 1) ? B->b1 : B->b0, ((i >> 2) & 1) ? B->c1 : B->c0, &x[i], &y[i], &z[i]);
     float dx = x[i] - camx, dz = z[i] - camz; zz[i] = dx * camhx + dz * camhz; if (zz[i] >= .401f) any = 1; }
   if (!any) return;
@@ -272,6 +295,7 @@ static void drawbx(int bi) {
   for (int i = 1; i < 6; i++) { int a = id[i]; float v = dp[i]; int j = i - 1; while (j >= 0 && dp[j] < v) { id[j + 1] = id[j]; dp[j + 1] = dp[j]; j--; } id[j + 1] = a; dp[j + 1] = v; }
   int r = B->r, g = B->g, b = B->b; float kk = (B->cond >= 3) ? 1.f : 1.9f;
   if (B->fr == 1 && B->cond == 3 && B->a1 == 1 && B->b1 < .7f) { r = ENG[ce].r; g = ENG[ce].g; b = ENG[ce].b; }
+  if (exploded || burning) { float ch = exploded ? .35f : 1.f - (fireT * .1f > .65f ? .65f : fireT * .1f); kk *= ch; }          // burnt black
   r = (int)(r * kk); g = (int)(g * kk); b = (int)(b * kk); if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
   for (int k = 0; k < 6; k++) { const uint8_t *q = FB[id[k]]; int count = 0; float wx[8], wy[8], wz[8], wd[8], xs[8], ys[8];
     for (int e = 0; e < 4; e++) { int a = q[e], b0 = q[(e + 1) & 3], ina = zz[a] >= .401f, inb = zz[b0] >= .401f;
@@ -305,7 +329,8 @@ static void gauge(int cx, int cy, int r, float value, uint16_t needle, int gear)
 }
 static void draw_overlay(float kmh, int gear) {
   curZ = -1; blendA = 0;
-  int sp = (int)(kmh + .5f), sc = lw >= 150 ? 2 : 1, g = gear < 0 ? 10 : gear;
+  if (flashT > 0.f) { blendA = (int)(flashT * 215.f); frect(0, 0, lw, lh, C(255, 240, 200)); blendA = 0; }   // explosion flash
+  int sp = (int)(kmh + .5f), sc = lw >= 150 ? 2 : 1, g = gear < 0 ? 10 : gear, blink = ((int)(fxClock * 6.f)) & 1;
   float rpm = engineRpm / 7000.f;
   if (camInterior) {                                          // dashboard, steering wheel and gauges, always on top
     int bandY = lh - lh / 5, R = lw * 15 / 100, wx = lw * 40 / 100, wy = lh - R / 3, gr = lh * 8 / 100 + 1;
@@ -317,14 +342,23 @@ static void draw_overlay(float kmh, int gear) {
     for (int k = 0; k < 3; k++) { float th = a + 1.5708f * (k == 0 ? 2 : (k == 1 ? 0 : -1)); int x = wx + (int)((R - 2) * fsin(th + 1.5708f)), y = wy - (int)((R - 2) * fsin(th));
       line(wx, wy, x, y, C(58, 62, 70)); line(wx, wy + 1, x, y + 1, C(58, 62, 70)); }
     disc(wx, wy, R / 5 + 1, C(95, 102, 110));   // hub
+    int bh = lh - bandY - 5, bx1 = lw * 5 / 100, bx2 = lw * 10 / 100;                       // fuel and engine temperature
+    frect(bx1, bandY + 3, 3, bh, C(34, 38, 44)); int ff = (int)(bh * fuel); frect(bx1, bandY + 3 + bh - ff, 3, ff, fuel < .2f ? C(235, 70, 55) : C(240, 205, 85));
+    frect(bx2, bandY + 3, 3, bh, C(34, 38, 44)); float tt = engTemp / 1.6f; if (tt > 1.f) tt = 1.f; int tf = (int)(bh * tt); frect(bx2, bandY + 3 + bh - tf, 3, tf, engTemp > 1.f ? C(235, 70, 55) : (engTemp > .75f ? C(240, 190, 70) : C(90, 180, 235)));
+    if (burning && blink) frect(lw * 15 / 100, bandY + 3, 5, 5, C(255, 60, 40));             // fire lamp
+    else if (tankHp < .6f && fuel > .01f) frect(lw * 15 / 100, bandY + 3, 5, 5, C(255, 170, 40));   // fuel leak lamp
     return;
   }
-  int W = 17 * sc + 6, H = 5 * sc + 11, x0 = lw - W - 3, y0 = lh - H - 3;   // chase view: compact speed / rpm / gear block
+  int W = 17 * sc + 6, H = 5 * sc + 16, x0 = lw - W - 3, y0 = lh - H - 3;   // chase view: compact speed / rpm / gear block
   frect(x0, y0, W, H, C(10, 12, 18)); frect(x0, y0, W, 1, C(70, 78, 90));
   int bw = W - 6, fill = (int)(bw * (rpm > 1.f ? 1.f : rpm)); frect(x0 + 3, y0 + 3, bw, 2, C(40, 44, 52)); frect(x0 + 3, y0 + 3, fill, 2, rpm > .83f ? C(235, 70, 55) : C(80, 210, 120));
   int d[3] = {sp / 100 % 10, sp / 10 % 10, sp % 10}, started = 0;
   for (int i = 0; i < 3; i++) { if (d[i] || started || i == 2) { started = 1; glyph(x0 + 3 + i * 4 * sc, y0 + 7, d[i], sc, 0xFFFF); } }
   glyph(x0 + 3 + 14 * sc, y0 + 7, g, sc, g == 10 ? C(255, 130, 90) : C(240, 205, 85));
+  int fy = y0 + 9 + 5 * sc;                                                              // fuel bar, then engine temperature bar
+  frect(x0 + 3, fy, bw, 2, C(40, 44, 52)); frect(x0 + 3, fy, (int)(bw * fuel), 2, fuel < .2f ? C(235, 70, 55) : C(240, 205, 85));
+  float tt = engTemp / 1.6f; if (tt > 1.f) tt = 1.f; frect(x0 + 3, fy + 3, bw, 2, C(40, 44, 52)); frect(x0 + 3, fy + 3, (int)(bw * tt), 2, engTemp > 1.f ? C(235, 70, 55) : (engTemp > .75f ? C(240, 190, 70) : C(90, 180, 235)));
+  if (burning && blink) frect(x0, y0, W, 1, C(255, 70, 40));
 }
 static void car(void) {
   float cxm = 0, czm = 0; np = NC; curZ = -1; blendA = 0;
@@ -342,7 +376,7 @@ static void car(void) {
     for (int k = 0; k < 3; k++) { CFX[k] = dx[k] / sxx; CFY[k] = dy[k] / syy; CFZ[k] = dz[k] / szz; } CFO[0] = wx; CFO[1] = wy; CFO[2] = wz; }
   int ri[64]; for (int i = 0; i < 60; i++) ri[i] = i;
   float oh = oHood, ot = oTrunk, od = oDoor, rhx, rhz; heading(&rhx, &rhz);
-  if (oh > .02f && pAtt[0] > 0) { ri[22] = rot(22, 25, 24, oh * 1.05f, 0, cxm, czm, rhx, rhz); ri[23] = rot(23, 25, 24, oh * 1.05f, 0, cxm, czm, rhx, rhz); }
+  if (oh > .02f && pAtt[0] > 0) { ri[22] = rot(22, 25, 24, oh * 1.3f, 0, cxm, czm, rhx, rhz); ri[23] = rot(23, 25, 24, oh * 1.3f, 0, cxm, czm, rhx, rhz); }
   if (ot > .02f && pAtt[3] > 0) { ri[34] = rot(34, 37, 36, ot * 1.2f, 0, cxm, czm, rhx, rhz); ri[35] = rot(35, 37, 36, ot * 1.2f, 0, cxm, czm, rhx, rhz); }
   if (od > .02f && pAtt[4] > 0) { ri[38] = rot(38, 39, 40, od * 1.1f, 1, cxm, czm, rhx, rhz); ri[41] = rot(41, 39, 40, od * 1.1f, 1, cxm, czm, rhx, rhz); }
   if (od > .02f && pAtt[5] > 0) { ri[42] = rot(42, 43, 44, od * 1.1f, 1, cxm, czm, rhx, rhz); ri[45] = rot(45, 43, 44, od * 1.1f, 1, cxm, czm, rhx, rhz); }
@@ -352,6 +386,7 @@ static void car(void) {
     for (int i = 0; i < nbc; i++) if (bm[i].f != 2 && bm[i].o == 0 && bm[i].f != 3) { float d = (bm[i].l0 - bm[i].lr) / bm[i].lr; d = (d < 0 ? -d : d) * 12; if (d > 1) d = 1; float x0, y0, x1, y1;
       if (proj(PX[bm[i].a], PY[bm[i].a], PZ[bm[i].a], &x0, &y0) && proj(PX[bm[i].b], PY[bm[i].b], PZ[bm[i].b], &x1, &y1)) line((int)x0, (int)y0, (int)x1, (int)y1, C(255, 255 - (int)(d * 230), 255 - (int)(d * 255))); }
     float hx_, hz_; heading(&hx_, &hz_); for (int w = 14; w < 18; w++) { float ax = hz_, az = -hx_; wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(WHL[cw].cr, WHL[cw].cg, WHL[cw].cb)); }
+    for (int b = NBX; b < NBX + NSB; b++) drawbx(b);                      // x-ray: radiator, tank, gearbox, driveshaft...
     return;
   }
   float hx_, hz_, ccx = 0, ccz = 0; heading(&hx_, &hz_); for (int i = 0; i < 22; i++) { ccx += n[i].x / 22; ccz += n[i].z / 22; }
@@ -365,10 +400,10 @@ static void car(void) {
   // far-side glass first
   for (int k = 0; k < NPAT; k++) if (!fc[k] && PL[k].cls == 0 && (PL[k].kind == K_WIN || PL[k].kind == K_DOOR)) drawpat(k, &PL[k], 3, 0, cxm);
   // interior pass: inner walls, solids (seats, dashboard, trunk, engine bay, engine) and far-side wheels, far to near
-  int it[80]; float dp[80]; int ni = 0; int bayOpen = oh > .05f || pAtt[0] <= 0, trunkOpen = ot > .05f || pAtt[3] <= 0;
+  int it[128]; float dp[128]; int ni = 0; int bayOpen = oh > .05f || pAtt[0] <= 0, trunkOpen = ot > .05f || pAtt[3] <= 0;
   for (int k = 0; k < NPAT; k++) if (PL[k].cls == 1 && !fc[k]) { it[ni] = k; dp[ni++] = pd[k]; }
-  for (int b = 0; b < NBX; b++) { int cd = BXS[b].cond; if ((cd == 1 && !trunkOpen) || (cd == 2 && !bayOpen) || (cd == 3 && !(bayOpen || pAtt[7] <= 0)) || (cd == 4 && (ce != 3 || !(bayOpen || pAtt[7] <= 0)))) continue;
-    float x, y, z; fpt(BXS[b].fr, (BXS[b].a0 + BXS[b].a1) / 2, (BXS[b].b0 + BXS[b].b1) / 2, (BXS[b].c0 + BXS[b].c1) / 2, &x, &y, &z); it[ni] = 100 + b; dp[ni++] = (x - camx) * camhx + (z - camz) * camhz; }
+  for (int b = 0; b < NBX + NSB; b++) { const Bx *Q = bx_at(b); if (!bx_show(Q, bayOpen, trunkOpen)) continue;
+    float x, y, z; fpt(Q->fr, (Q->a0 + Q->a1) / 2, (Q->b0 + Q->b1) / 2, (Q->c0 + Q->c1) / 2, &x, &y, &z); it[ni] = 100 + b; dp[ni++] = (x - camx) * camhx + (z - camz) * camhz; }
   for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (sw * camSide > 0) continue; it[ni] = 200 + w; dp[ni++] = (n[w].x - camx) * camhx + (n[w].z - camz) * camhz; }
   for (int i = 1; i < ni; i++) { int a = it[i]; float v = dp[i]; int j = i - 1; while (j >= 0 && dp[j] < v) { it[j + 1] = it[j]; dp[j + 1] = dp[j]; j--; } it[j + 1] = a; dp[j + 1] = v; }
   const Whl *W = &WHL[cw];
@@ -382,6 +417,39 @@ static void car(void) {
   for (int q = 0; q < no; q++) drawpat(ok[q], &PL[ok[q]], 2, fc[ok[q]], cxm);
   for (int w = 14; w < 18; w++) { int sw = (w & 1) ? 1 : -1; if (sw * camSide <= 0) continue; float ax = hz_, az = -hx_; if (w >= 16) { float c = fsin(steer + 1.5708f), sn = fsin(steer); ax = hz_ * c - hx_ * sn; az = -(hx_ * c + hz_ * sn); } wheel3d(n[w].x, n[w].y, n[w].z, n[w].r * 1.08f, ax, az, wspin, C(W->cr, W->cg, W->cb)); }
   for (int q = 0; q < no; q++) { int k = ok[q]; if (fc[k] && (PL[k].kind == K_WIN || PL[k].kind == K_DOOR)) drawpat(k, &PL[k], 3, 1, cxm); }
+}
+// ---- fire, smoke, coolant steam and the explosion fireball (world-space sprites, painted in the car's depth slot)
+static void puff(float x, float y, float z, float r, uint16_t c) {
+  float sx, sy; if (!proj(x, y, z, &sx, &sy)) return;
+  float d = (x - camx) * camhx + (z - camz) * camhz; if (d < .5f) return;
+  int rr = (int)(r * FOC / d + .5f); if (rr < 1) rr = 1; if (rr > 28) rr = 28; disc((int)sx, (int)sy, rr, c);
+}
+static void fire_src(float wx, float wy, float wz, float k, int seed) {      // k = intensity 0..1
+  for (int i = 0; i < 7; i++) {                                              // smoke first, flames on top
+    float ph = fxClock * .45f + i * .143f + seed * .31f; ph -= (int)ph; float fl = 1.f - ph * .5f; int g = 74 - (int)(ph * 36);
+    puff(wx + fsin(i * 12.9f + seed) * .5f * fl, wy + .9f + ph * 2.4f * (.5f + k * .5f), wz + fsin(i * 7.7f + 2.f + seed) * .5f * fl, (.22f + ph * .55f) * (.5f + k * .5f), C(g, g, g + 4));
+  }
+  for (int i = 0; i < 12; i++) {
+    float ph = fxClock * 2.2f + i * .0837f + seed * .27f; ph -= (int)ph; float fl = 1.f - ph * .6f, r = (.34f - ph * .26f) * (.45f + k * .75f);
+    uint16_t c = ph < .25f ? C(255, 235, 120) : (ph < .55f ? C(255, 160, 45) : C(225, 70, 30));
+    puff(wx + fsin(i * 12.9f + seed) * .4f * fl, wy + ph * (.9f + k * .9f), wz + fsin(i * 7.7f + 2.f + seed) * .4f * fl, r, c);
+  }
+}
+static void draw_fx(void) {
+  if (!burning && steamI <= 0.f && boomT > 2.f) return;
+  curZ = -1; blendA = 0; float x, y, z;
+  if (steamI > 0.f && !burning) { fpt(0, 0.f, .85f, 1.7f, &x, &y, &z);                    // coolant steam from the radiator
+    for (int i = 0; i < 8; i++) { float ph = fxClock * .8f + i * .125f; ph -= (int)ph; int g = 235 - (int)(ph * 70);
+      puff(x + fsin(i * 5.1f) * .35f, y + ph * 1.5f, z + fsin(i * 3.7f) * .35f, (.1f + ph * .3f) * (.5f + steamI * .5f), C(g, g, g + 6 > 255 ? 255 : g + 6)); } }
+  if (burning) {
+    fpt(0, .4f, .8f, -1.65f, &x, &y, &z); fire_src(x, y, z, fireI, 0);                  // the tank burns first
+    if (fireT > 2.5f || exploded) { float k2 = exploded ? fireI : fireI * ((fireT - 2.5f) * .3f > 1.f ? 1.f : (fireT - 2.5f) * .3f);
+      fpt(0, 0.f, .9f, 1.45f, &x, &y, &z); fire_src(x, y, z, k2, 1); }                  // then the engine bay
+  }
+  if (boomT < 1.6f) { fpt(0, .4f, .8f, -1.65f, &x, &y, &z);                               // expanding fireball
+    for (int i = 0; i < 10; i++) { float a = i * 2.399f, rr = boomT * (3.5f + (i % 3) * 1.6f), r = (.7f + boomT * 1.6f) * (1.f - boomT * .45f);
+      uint16_t c = boomT < .35f ? C(255, 245, 190) : (boomT < .8f ? ((i & 1) ? C(255, 205, 80) : C(255, 140, 40)) : (boomT < 1.2f ? ((i & 1) ? C(235, 110, 40) : C(190, 60, 30)) : C(70, 66, 64)));
+      puff(x + fsin(a) * rr * .6f, y + boomT * (2.f + (i % 4)) * .9f, z + fsin(a + 1.5708f) * rr * .6f, r, c); } }
 }
 // ---- boxes (objects, trailer)
 static void draw_box(int n0, int cr, int cg, int cb) {
@@ -577,6 +645,7 @@ static void trailer_wheels(int nearPass) {
 static void frame(float *hx, float *hz, float *cx, float *cy, float *cz) {
   heading(hx, hz); *cx = *cy = *cz = 0; for (int i = 0; i < 20; i++) { *cx += n[i].x / 20; *cy += n[i].y / 20; *cz += n[i].z / 20; }
 }
+static uint16_t comp_col(float h) { return h > .7f ? C(80, 220, 100) : (h > .35f ? C(240, 200, 60) : C(255, 60, 50)); }
 static void draw_top(int cx0, int cy0, float S, int full) {
   float hx, hz, ccx, ccy, ccz; frame(&hx, &hz, &ccx, &ccy, &ccz); curZ = -1;
 #define TX(i) (cx0 + ((n[i].x - ccx) * hz - (n[i].z - ccz) * hx) * S)
@@ -598,6 +667,15 @@ static void draw_top(int cx0, int cy0, float S, int full) {
     if (wAtt[w] > 0) { for (int q = -1; q <= 1; q++) { int hh = full ? 5 : 2, ww = full ? 2 : 1; for (int yy = -hh; yy <= hh; yy++) for (int xx = -ww; xx <= ww; xx++) px((int)TX(i) + xx, (int)TY(i) + yy, C(150, 150, 160)); } }
     else { int r = full ? 6 : 3; line(x - r, y - r, x + r, y + r, C(255, 40, 40)); line(x - r, y + r, x + r, y - r, C(255, 40, 40)); }
   }
+  {                                                                                     // radiator (front), fuel tank (rear), driveshaft (centre line)
+    int hwR = (int)(.6f * S * gsx), yR = (int)(cy0 - 1.78f * S * gsz), yT = (int)(cy0 + 1.7f * S * gsz), y0s = (int)(cy0 - .9f * S * gsz), y1s = (int)(cy0 + 1.3f * S * gsz), xc = (int)cx0;
+    for (int q = 0; q <= (full ? 1 : 0); q++) { line(xc - hwR, yR + q, xc + hwR, yR + q, comp_col(radHp)); line(xc - hwR, yT + q, xc + hwR, yT + q, comp_col(tankHp)); line(xc + q, y0s, xc + q, y1s, comp_col(shaftHp)); }
+    int r = full ? 4 : 2, ym = (y0s + y1s) / 2;
+    if (radHp < .3f) { line(xc - r, yR - r, xc + r, yR + r, C(255, 40, 40)); line(xc - r, yR + r, xc + r, yR - r, C(255, 40, 40)); }
+    if (tankHp < .3f) { line(xc - r, yT - r, xc + r, yT + r, C(255, 40, 40)); line(xc - r, yT + r, xc + r, yT - r, C(255, 40, 40)); }
+    if (shaftHp < .3f) { line(xc - r, ym - r, xc + r, ym + r, C(255, 40, 40)); line(xc - r, ym + r, xc + r, ym - r, C(255, 40, 40)); }
+    if (burning && (((int)(fxClock * 6.f)) & 1)) disc(xc, yT - (full ? 6 : 3), full ? 4 : 2, C(255, 150, 40));
+  }
 }
 static void zones(int *zp) {
   float hx, hz, ccx, ccy, ccz, sum[5] = {0, 0, 0, 0, 0}; int cnt[5] = {0, 0, 0, 0, 0}; frame(&hx, &hz, &ccx, &ccy, &ccz);
@@ -617,6 +695,12 @@ static void present(int xd0) {
     eadk_display_push_rect((eadk_rect_t){xd0, by, w, 16}, buf);
   }
 }
+static void draw_bot(int slot) {          // a physical bot is drawn by the very same car() and draw_fx() as the player's car
+  Bot *b = &bots[slot]; float sw = wspin, sh = oHood, sd = oDoor, st = oTrunk; int ss = structure;
+  bot_enter(b); wspin = b->spin; oHood = oDoor = oTrunk = 0.f; structure = 0;
+  car(); draw_fx();
+  bot_leave(b); wspin = sw; oHood = sh; oDoor = sd; oTrunk = st; structure = ss;
+}
 static float depth_of(float x, float z) { return (x - camx) * camhx + (z - camz) * camhz; }
 static void scene(int xd0) {
   int xl = xd0 * lw / 320; terrain(xl);
@@ -626,21 +710,23 @@ static void scene(int xd0) {
   for (int o = 0; o < nobj && m < 12; o++) { int b = nob0 + o * 8; L[m].ty = 2; L[m].idx = o; L[m++].d = depth_of(n[b].x, n[b].z); }
   if (mapId == 3) { make_city(); for (int b = 0; b < 16; b++) { L[m].ty = 3; L[m].idx = b; L[m++].d = depth_of(cityBlocks[b].x, cityBlocks[b].z); }
     if (trafficEnabled) for (int a = 0; a < trafficCount; a++) {
+      if (traffic[a].bot) { if (m < 96) { L[m].ty = 7; L[m].idx = traffic[a].bot - 1; L[m++].d = depth_of(traffic[a].x, traffic[a].z); } continue; }
       float dx = traffic[a].x - camx, dz = traffic[a].z - camz, d = dx * camhx + dz * camhz, side = dx * camhz - dz * camhx;
       if (d < 1.f || d >= zmax - 2.f || side < -d * 1.45f - 3.f || side > d * 1.45f + 3.f) continue;
       L[m].ty = 4; L[m].idx = a; L[m++].d = d;
     }
-    if (pursuitEnabled && m < 95) { L[m].ty = 6; L[m].idx = 0; L[m++].d = depth_of(policeCar.x, policeCar.z); }
+    if (pursuitEnabled && m < 95) { if (policeCar.bot) { L[m].ty = 7; L[m].idx = policeCar.bot - 1; } else { L[m].ty = 6; L[m].idx = 0; } L[m++].d = depth_of(policeCar.x, policeCar.z); }
     for (int w = 0; w < 4 && m < 96; w++) { float x = w < 2 ? (w == 0 ? -56.5f : 56.5f) : 0.f, z = w < 2 ? 0.f : (w == 2 ? -72.5f : 72.5f); L[m].ty = 5; L[m].idx = w; L[m++].d = depth_of(x, z); } }
   for (int i = 1; i < m; i++) { __typeof__(L[0]) v = L[i]; int j = i - 1; while (j >= 0 && L[j].d < v.d) { L[j + 1] = L[j]; j--; } L[j + 1] = v; }
   for (int k = 0; k < m; k++) {
-    if (L[k].ty == 0) car();
+    if (L[k].ty == 0) { car(); draw_fx(); }
     else if (L[k].ty == 1) { trailer_wheels(0); draw_box(ntr, 150, 150, 160); trailer_wheels(1); }
     else if (L[k].ty == 2 && L[k].d > 1 && L[k].d < zmax - 2) { const Obj *O = &OBJ[okind[L[k].idx]]; draw_box(nob0 + L[k].idx * 8, O->r, O->g, O->b); }
     if (L[k].ty == 3 && L[k].d > 1 && L[k].d < zmax - 2) { draw_city_block(L[k].idx); draw_city_details(L[k].idx); }
     else if (L[k].ty == 4 && L[k].d > 1 && L[k].d < zmax - 2) draw_traffic(L[k].idx);
     else if (L[k].ty == 5 && L[k].d > 1 && L[k].d < zmax - 2) draw_city_wall(L[k].idx);
     else if (L[k].ty == 6 && L[k].d > 1 && L[k].d < zmax - 2) draw_police();
+    else if (L[k].ty == 7 && L[k].d > 1 && L[k].d < zmax - 2) draw_bot(L[k].idx);
   }
   if (weatherMode == 1 || weatherMode == 3) {
     uint16_t streak = weatherMode == 1 ? C(155, 190, 210) : C(205, 218, 220);
@@ -759,8 +845,8 @@ static void draw_ctrl(int sel, int cap) {
   txt(cap ? "Retour: annuler" : "OK: changer  Retour: quitter", 10, 220, 0, C(150, 160, 190), C(15, 18, 28));
 }
 static int turboT, gi, ri; static float tscale = 1.f;
-#define QUICK_COUNT 21
-static const char *QL[QUICK_COUNT] = {"Reparer tout", "Turbo", "Boost !", "Voiture", "Moteur", "Remorque", "Route", "Gravite", "Temps", "Retour au depart", "Trafic IA", "Nombre IA", "Comportement IA", "Vitesse IA", "Plan de ville", "Meteo", "Puissance", "Adherence", "Suspension", "Freinage", "Poursuite police"};
+#define QUICK_COUNT 22
+static const char *QL[QUICK_COUNT] = {"Reparer tout", "Turbo", "Boost !", "Voiture", "Moteur", "Remorque", "Route", "Gravite", "Temps", "Retour au depart", "Trafic IA", "Nombre IA", "Comportement IA", "Vitesse IA", "Plan de ville", "Meteo", "Puissance", "Adherence", "Suspension", "Freinage", "Poursuite police", "Test: percer>feu>boom"};
 static void draw_quick(int sel) {
   static const char *RN[3] = {"Seche", "Mouillee", "Glace"}, *GN[3] = {"Normale", "Lune", "Forte"};
   static const char *AI_MODE[3] = {"Circuit", "Suit joueur", "Patrouille"}, *AI_SPEED[5] = {"Tres lent", "Lent", "Normal", "Rapide", "Tres rapide"};
@@ -790,6 +876,9 @@ static void draw_dmg(void) {
   { char ln[28]; ln[0] = 0; char *p = ln; int y = 124, any = 0;
     for (int g = 0; g < NG; g++) if (pAtt[g] <= 0) { any = 1; if ((p - ln) + (int)sizeof(PNAME[0]) > 0 && (p - ln) > 11) { txt(ln, 190, y, 0, C(255, 120, 100), C(15, 18, 28)); y += 14; p = ln; *p = 0; } p = cat(p, PNAME[g]); p = cat(p, " "); }
     if (any) txt(ln, 190, y, 0, C(255, 120, 100), C(15, 18, 28)); else txt("Aucune piece perdue", 190, y, 0, C(120, 220, 120), C(15, 18, 28)); }
+  { const char *nm[4] = {"Rad ", "Res ", "Arb ", "Ess "}; float v[4] = {radHp, tankHp, shaftHp, fuel};
+    for (int i = 0; i < 4; i++) { char t[12], *q = t; q = cat(q, nm[i]); cat(q, ""); q = num(q, (int)(v[i] * 100.f + .5f)); *q = 0; txt(t, 2, 40 + i * 14, 0, comp_col(v[i]), C(15, 18, 28)); }
+    if (exploded) txt("BOOM!", 2, 100, 0, C(255, 120, 40), C(15, 18, 28)); else if (burning) txt("FEU!", 2, 100, 0, C(255, 120, 40), C(15, 18, 28)); }
   char s[24], *p = s;
   int wl = 0; for (int w = 0; w < 4; w++) wl += wAtt[w] > 0; p = s; p = cat(p, "Roues: "); p = num(p, wl); cat(p, "/4"); txt(s, 190, 192, 0, 0xFFFF, C(15, 18, 28));
   p = s; p = cat(p, "Total: "); p = num(p, (int)dmg); cat(p, "%"); txt(s, 190, 208, 0, C(255, 210, 80), C(15, 18, 28));
@@ -797,8 +886,10 @@ static void draw_dmg(void) {
   else txt("Une touche pour revenir", 6, 226, 0, C(150, 160, 190), C(15, 18, 28));
 }
 static void hud(int kmh, int gear, int lap, int ms, int best) {
-  char s[64], *p = s; p = num(p, kmh); p = cat(p, "km/h "); if (gear < 0) p = cat(p, "R"); else { p = cat(p, "G"); p = num(p, gear); }
+  char s[80], *p = s; p = num(p, kmh); p = cat(p, "km/h "); if (gear < 0) p = cat(p, "R"); else { p = cat(p, "G"); p = num(p, gear); }
   p = cat(p, " Deg "); p = num(p, (int)dmg); p = cat(p, "%"); if (turbo) p = cat(p, " TURBO");
+  if (exploded) p = cat(p, " BOOM!"); else if (burning) p = cat(p, " FEU!"); else if (tankHp < .6f && fuel > .01f) p = cat(p, " FUITE");
+  if (engTemp > 1.f && !burning) p = cat(p, " TEMP!"); if (fuel < .12f && !burning) p = cat(p, " ESS");
   if (mapId == 0) { p = cat(p, " T"); p = num(p, lap); p = cat(p, " "); p = num(p, ms / 60000); p = cat(p, ":"); int sc = ms / 1000 % 60; if (sc < 10) p = cat(p, "0"); p = num(p, sc); p = cat(p, "."); p = num(p, ms / 100 % 10);
     if (best) { p = cat(p, " B"); p = num(p, best / 60000); p = cat(p, ":"); sc = best / 1000 % 60; if (sc < 10) p = cat(p, "0"); p = num(p, sc); } }
   else if (mapId == 2) { p = cat(p, " Test "); p = num(p, CRASHV[crashI]); if (ct == 2) { p = cat(p, " SCORE "); p = num(p, score); } else if (ct == 1) p = cat(p, " IMPACT!"); }
@@ -908,8 +999,8 @@ int main(void) {
       float tgt = (bdown(k, A_RIGHT) ? 1.f : 0) - (bdown(k, A_LEFT) ? 1.f : 0);
       stw += (tgt * (.30f + .05f * steerL) / (1.f + sp * .06f) - stw) * (.1f + .05f * steerL); steer = stw;
       uint64_t now = eadk_timing_millis(); float dtf = (float)(now - last) * tscale; wspin += vf * dtf * .001f / .35f; acc += dtf; last = now; if (acc > 60) acc = 60;
-      while (acc >= 3.5f) { step(.0035f); acc -= 3.5f; }
-      traffic_update(dtf * .001f);
+      while (acc >= 3.5f) { world_step(.0035f); acc -= 3.5f; }
+      traffic_update(dtf * .001f); fx_update(dtf * .001f); bots_frame(dtf * .001f);
       if (mapId == 0) {
         if (cx < -TA * .8f && cz > -20 && cz < 20) cp = 1;
         if (cp && pz < 0 && cz >= 0 && cx > 0) { int t = (int)(now - lapT); if (!best || t < best) best = t; lap++; lapT = now; cp = 0; }
@@ -991,6 +1082,7 @@ int main(void) {
           if (sel == 17) { latG = WHL[cw].gr * VEH[cv].gr * tuneGrip; if (latG > .45f) latG = .45f; }
           if (sel == 18 && old > 0.f) for (int b = 0; b < nb; b++) if (bm[b].f == 1) { bm[b].k *= *tune / old; bm[b].c *= *tune / old; }
         } else if (sel == 20) { pursuitEnabled ^= 1; traffic_reset(); }
+        else if (sel == 21 && O) { static int demo; demo = (demo + 1) % 3; if (demo == 1) tankHp = .3f; else if (demo == 2) { burning = 1; fireT = 0.f; fireI = .1f; boomAt = 1e9f; } else explode(); close = 1; }
         if (close) { st = S_GAME; eadk_display_push_rect_uniform(eadk_screen_rect, 0); last = eadk_timing_millis(); acc = 0; }
       }
       if (B || bpress(k, A_QUICK)) { st = S_GAME; eadk_display_push_rect_uniform(eadk_screen_rect, 0); last = eadk_timing_millis(); acc = 0; }

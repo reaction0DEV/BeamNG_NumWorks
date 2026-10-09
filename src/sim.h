@@ -9,9 +9,10 @@
 static float G = 14.f, gripF = 1.f; static int turbo;
 typedef struct { float x, y, z, vx, vy, vz, im, r, rc; uint8_t gnd, t; } Node;   // t: 0 body, 1 car wheel, 2 trailer wheel
 typedef struct { uint8_t a, b, f, t0, o, g; float l0, lr, k, c, yl, bk; } Beam;  // f: 0 body 1 susp 2 broken 3 hitch 4 panel attach; o: 0 car 1 trailer 2 object
-static Node n[NMAX]; static Beam bm[MB];
+static Node nPl[NMAX]; static Beam bmPl[MB]; static Node *n = nPl; static Beam *bm = bmPl;   // active vehicle: the player's by default, bots swap these pointers
+static int nbCap = MB;
 static int nn, nb, nbody, nbc, ntr = -1, nob0, nobj, pAtt[NG], pAtt0[NG], wAtt[4], trl, solid = 1, mapId;
-typedef struct { float x, z, phase, speed, hx, hz; } TrafficCar;
+typedef struct { float x, z, phase, speed, hx, hz; uint8_t bot; } TrafficCar;   // bot: 0 = kinematic rail car, else physics-bot slot + 1
 static TrafficCar traffic[MAX_AI]; static int trafficEnabled = 1, trafficCount = 6, trafficBehavior, trafficSpeed = 2;
 static TrafficCar policeCar; static int pursuitEnabled, cityPlan, weatherMode;
 static float tunePower = 1.f, tuneGrip = 1.f, tuneSusp = 1.f, tuneBrake = 1.f, signalClock;
@@ -19,11 +20,20 @@ static const uint8_t PB[NG] = {22, 26, 30, 34, 38, 42, 46, 50, 54, 57}, PN[NG] =
 static const char *PNAME[NG] = {"Capot", "Pare-ch.AV", "Pare-ch.AR", "Coffre", "Porte G", "Porte D", "Pare-brise", "Moteur", "Siege G", "Siege D"};
 static float thr, brk, steer, dmg, gfeat, gdist, engA = 10, engV = 38, engineRpm = 900, engineOutput = .45f, latG = .25f, gsx = 1, gsz = 1;
 static int gearNow = 1;
+// ---- vehicle systems: radiator (front), fuel tank (rear), driveshaft (underbody). Pierced tank => leak, fire or explosion.
+static float fuel = 1.f, coolant = 1.f, engTemp = .3f, radHp = 1.f, tankHp = 1.f, shaftHp = 1.f, driveEff = 1.f;
+static float fireI, fireT, boomAt = 1e9f, boomT = 99.f, flashT, jolt, vcmx, vcmz, steamI, fxClock;
+static int burning, exploded, fxPrimed; static unsigned fxSeed = 777u;
+static float fx_rand(void) { fxSeed = fxSeed * 1664525u + 1013904223u; return (fxSeed >> 8) / 16777215.f; }
+static void fx_reset(void) {
+  fuel = 1.f; coolant = 1.f; engTemp = .3f; radHp = tankHp = shaftHp = driveEff = 1.f; fireI = fireT = 0.f; boomAt = 1e9f; boomT = 99.f;
+  flashT = 0.f; jolt = vcmx = vcmz = steamI = 0.f; burning = exploded = fxPrimed = 0;
+}
 static const float SOLF[3] = {1.6f, 1.f, .65f};
 typedef struct { const char *nm; float sx, sy, sz, im, pw, gr; uint8_t r, g, b; } Veh;
 #define NV 5
 static char genName[16] = "Gen #1";
-static Veh VEH[NV] = {{"Berline",1,1,1,1,1,1,200,35,30},{"Sport",1.05f,.8f,1.12f,1.1f,1.15f,1.12f,40,90,210},
+static Veh VEH[NV + 1] = {{"Berline",1,1,1,1,1,1,200,35,30},{"Sport",1.05f,.8f,1.12f,1.1f,1.15f,1.12f,40,90,210},
   {"Pick-up",1.12f,1.25f,1.15f,.8f,.95f,.85f,230,170,30},{"Buggy",.8f,.85f,.7f,1.3f,1.1f,1.15f,60,180,70},{genName,1,1,1,1,1,1,150,150,150}};
 static unsigned genSeed = 1, genState;
 static float gen_random(void) { genState = genState * 1664525u + 1013904223u; return (genState >> 8) / 16777215.f; }
@@ -134,9 +144,11 @@ static float gh(float x, float z) {
 }
 static void heading(float *hx, float *hz);
 static void traffic_update(float dt);
+static void bots_clear(void);
 static void traffic_reset(void) {
+  bots_clear(); policeCar.bot = 0;
   static const float SPEED[5] = {4.5f, 7.f, 9.f, 12.f, 15.f};
-  for (int i = 0; i < MAX_AI; i++) { traffic[i].phase = i * ((trafficBehavior == 2 ? 114.f : 242.f) / (trafficCount > 0 ? trafficCount : 1)); traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; }
+  for (int i = 0; i < MAX_AI; i++) { traffic[i].phase = i * ((trafficBehavior == 2 ? 114.f : 242.f) / (trafficCount > 0 ? trafficCount : 1)); traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; traffic[i].bot = 0; }
   policeCar.x = (n[4].x + n[5].x) * .5f; policeCar.z = (n[4].z + n[5].z) * .5f - 12.f; policeCar.hx = 0; policeCar.hz = 1;
   traffic_update(0.f);
 }
@@ -145,6 +157,7 @@ static void traffic_update(float dt) {
   float px = (n[4].x + n[5].x) * .5f, pz = (n[4].z + n[5].z) * .5f, hx, hz; heading(&hx, &hz);
   if (trafficEnabled) for (int i = 0; i < trafficCount; i++) {
     TrafficCar *car = &traffic[i];
+    if (car->bot) continue;                                  // driven by the physics engine
     if (trafficBehavior == 1) {
       float distance = 5.f + (i / 4) * 2.5f, side = ((i % 4) - 1.5f) * 2.f, rx = hz, rz = -hx;
       float tx = px - hx * distance + rx * side, tz = pz - hz * distance + rz * side;
@@ -164,8 +177,8 @@ static void traffic_update(float dt) {
     else if (p < 2.f * Hh + W) { car->x = x1; car->z = z1 - (p - Hh - W); car->hx = 0; car->hz = -1; }
     else { car->x = x1 - (p - 2.f * Hh - W); car->z = z0; car->hx = -1; car->hz = 0; }
   }
-  for (int i = 0; i < trafficCount && trafficEnabled; i++) city_push_out(&traffic[i].x, &traffic[i].z, 1.2f);   // other city plans move the buildings
-  if (pursuitEnabled) {
+  for (int i = 0; i < trafficCount && trafficEnabled; i++) if (!traffic[i].bot) city_push_out(&traffic[i].x, &traffic[i].z, 1.2f);   // other city plans move the buildings
+  if (pursuitEnabled && !policeCar.bot) {
     float dx = px - policeCar.x, dz = pz - policeCar.z, distance = fsqrt(dx * dx + dz * dz) + .001f;
     float tx = dx / distance, tz = dz / distance, rate = (dt <= 0.f) ? 1.f : dt * 1.6f; if (rate > .08f) rate = .08f;
     policeCar.hx += (tx - policeCar.hx) * rate; policeCar.hz += (tz - policeCar.hz) * rate;
@@ -178,7 +191,7 @@ static void traffic_update(float dt) {
   signalClock += dt;
 }
 static void add_beam(int a, int b, int f, int o, int g, float k, float c, float yl, float bk) {
-  if (nb >= MB) return;
+  if (nb >= nbCap) return;
   float dx = n[b].x - n[a].x, dy = n[b].y - n[a].y, dz = n[b].z - n[a].z, L = fsqrt(dx * dx + dy * dy + dz * dz);
   bm[nb++] = (Beam){a, b, f, f, o, g, L, L, k, c, yl, bk};
 }
@@ -209,6 +222,7 @@ static void spawn_objects(void) {
 static void car_init(float x0, float z0, float hx, float hz, float lift, int objs) {
   const Veh *V = &VEH[cv]; const Whl *W = &WHL[cw]; const Sus *S = &SUS[cs]; const Cha *H = &CHA[cc]; float SF = SOLF[solid];
   if (mapId == 3) city_push_out(&x0, &z0, 3.2f);          // never spawn inside a building
+  fx_reset();
   float rx = hz, rz = -hx, oy = gh(x0, z0) + lift;
   engA = ENG[ce].a * V->pw * tunePower; engV = ENG[ce].v; gearNow = 1; engineRpm = 900.f; engineOutput = .45f; latG = W->gr * V->gr * tuneGrip; if (latG > .45f) latG = .45f; gsx = V->sx; gsz = V->sz;
   for (int i = 0; i < NC; i++) {
@@ -276,7 +290,7 @@ static void repair(float x0, float z0, float hx, float hz) {   // like BeamNG's 
   for (int i = 0; i < nbc; i++) { bm[i].f = bm[i].t0; bm[i].l0 = bm[i].lr; }
   for (int g = 0; g < NG; g++) pAtt[g] = 0; for (int w = 0; w < 4; w++) wAtt[w] = 0;
   for (int i = 0; i < nbc; i++) { if (bm[i].f == 4) pAtt[bm[i].g]++; else if (bm[i].f == 1 && bm[i].o == 0) wAtt[bm[i].g]++; }
-  car_pose(x0, z0, hx, hz, gh(x0, z0) + .5f); dmg = 0;
+  car_pose(x0, z0, hx, hz, gh(x0, z0) + .5f); dmg = 0; fx_reset();
 }
 static float thrustAcc, latX, latY, latZ;
 static void engine_update(float speed) {
@@ -308,7 +322,7 @@ static void tire(Node *p, float fx, float fz, float nx, float ny, float nz, int 
   { float J = d / p->im * .7f; latX -= lx * J; latY -= ly * J; latZ -= lz * J; }  // ...the rest through the whole body (no tipping over)
   if (!drive) return;
   float vf = p->vx * tx + p->vy * ty + p->vz * tz;
-  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF);
+  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff;
   if (thr != 0 && !(thr > 0 && vf > eV) && !(thr < 0 && vf < -10)) {
 #ifdef THRUSTBODY
     thrustAcc += thr * eA * dt * .25f;
@@ -428,4 +442,314 @@ static void step(float dt) {
       }
     }
   }
+}
+
+// ---- systems damage: looks at the crushed / broken body beams around each component
+static float rawR, rawT, rawS;                                        // raw damage sums (kept for tuning)
+static void comp_damage(void) {
+  float sr = 0, st = 0, ss = 0;
+  for (int i = 0; i < nbc; i++) {
+    Beam *b = &bm[i]; if (b->o != 0 || (b->t0 != 0 && b->t0 != 4) || b->a >= 50 || b->b >= 50) continue;   // body, bumpers and their attachments
+    float sev;
+    if (b->t0 == 4) sev = b->f == 2 ? .1f : 0.f;                                         // a torn-off attachment
+    else { float def = (b->l0 - b->lr) / b->lr; if (def < 0) def = -def; sev = b->f == 2 ? 1.f : def * 5.f; if (sev > 1.f) sev = 1.f; }
+    if (sev < .05f) continue;
+    float za = P[b->a][2], zb = P[b->b][2], ya = P[b->a][1], yb = P[b->b][1], mx = (P[b->a][0] + P[b->b][0]) * .5f, mz = (za + zb) * .5f;
+    if (za >= 1.9f || zb >= 1.9f) sr += sev;                                              // reaches the nose: radiator
+    if (za <= -1.9f || zb <= -1.9f) st += sev;                                            // reaches the tail: fuel tank
+    if (b->t0 == 0 && ya < .9f && yb < .9f && mx > -.6f && mx < .6f && mz > -1.4f && mz < 1.4f) ss += sev * 1.6f;   // central underbody: driveshaft
+  }
+  for (int w = 0; w < 4; w++) if (wAtt[w] <= 0) ss += .9f;                                    // a torn-off wheel takes the axle line with it
+  if (dmg > 75.f) ss += (dmg - 75.f) * .12f;                                                  // a totalled car has a broken driveline
+  rawR = sr; rawT = st; rawS = ss;
+  float h;
+  h = 1.f - sr / 3.8f; if (h < radHp) radHp = h < 0 ? 0 : h;
+  h = 1.f - st / 6.f; if (h < tankHp) tankHp = h < 0 ? 0 : h;
+  h = 1.f - ss / 2.6f; if (h < shaftHp) shaftHp = h < 0 ? 0 : h;
+}
+static void explode(void) {
+  float hx, hz, cx = 0, cy = 0, cz = 0; heading(&hx, &hz);
+  for (int i = 0; i < 20; i++) { cx += n[i].x * .05f; cy += n[i].y * .05f; cz += n[i].z * .05f; }
+  float bx = cx - hx * 1.6f * gsz, bz = cz - hz * 1.6f * gsz, by = cy - .3f;                 // blast centre = the tank
+  for (int i = 0; i < nn; i++) { Node *p = &n[i]; float dx = p->x - bx, dy = p->y - by + .6f, dz = p->z - bz, d = fsqrt(dx * dx + dy * dy + dz * dz) + .4f, k = 26.f / (1.f + d * .6f) / d;
+    p->vx += dx * k + (fx_rand() - .5f) * 3.f; p->vy += dy * k + 4.f; p->vz += dz * k + (fx_rand() - .5f) * 3.f; }
+  for (int i = 0; i < nbc; i++) { Beam *b = &bm[i]; if (b->o != 0) continue;
+    if (b->f == 0 && b->t0 == 0 && fx_rand() < .3f) b->f = 2;
+    else if (b->f == 1 && fx_rand() < .25f) { b->f = 2; wAtt[b->g]--; } }
+  for (int g = 0; g < NG; g++) if (pAtt[g] > 0 && fx_rand() < (g < 6 ? .8f : .35f)) {       // panels are blown off
+    for (int q = 0; q < nbc; q++) if (bm[q].o == 0 && bm[q].f == 4 && bm[q].g == g) bm[q].f = 2;
+    pAtt[g] = 0; for (int j = 0; j < PN[g]; j++) { Node *pn = &n[PB[g] + j]; pn->vy += 6.f + fx_rand() * 4.f; pn->vx += (fx_rand() - .5f) * 8.f; } }
+  exploded = 1; burning = 1; fireI = 1.f; fireT = 0.f; boomT = 0.f; flashT = 1.f; fuel = .2f; dmg = 100.f; tankHp = 0.f;
+  if (radHp > .2f) radHp = .2f; if (shaftHp > .3f) shaftHp = .3f;
+}
+static void fx_update(float dt) {                 // once per frame
+  if (dt <= 0.f) return; if (dt > .1f) dt = .1f;
+  fxClock += dt;
+  float vx = 0, vz = 0; for (int i = 0; i < 20; i++) { vx += n[i].vx * .05f; vz += n[i].vz * .05f; }
+  if (!fxPrimed) { vcmx = vx; vcmz = vz; fxPrimed = 1; }
+  float dvx = vx - vcmx, dvz = vz - vcmz; jolt = fsqrt(dvx * dvx + dvz * dvz); vcmx = vx; vcmz = vz;   // speed lost in this frame
+  float spd = fsqrt(vx * vx + vz * vz), ta = thr < 0 ? -thr : thr;
+  comp_damage();
+  if (radHp < .6f && coolant > 0.f) { coolant -= dt * (.6f - radHp) * .16f; if (coolant < 0.f) coolant = 0.f; }    // coolant leak
+  float target = .35f + .3f * ta; if (coolant < .5f) target += (.5f - coolant) * 2.6f;
+  engTemp += (target - engTemp) * dt * .12f;
+  steamI = (radHp < .6f && engTemp > .6f) ? (engTemp - .6f) * 1.5f : 0.f; if (steamI > 1.f) steamI = 1.f;
+  float pw = engTemp > 1.f ? 1.f - (engTemp - 1.f) * 1.8f : 1.f; if (pw < 0.f) pw = 0.f;
+  float sh = shaftHp > .65f ? 1.f : (shaftHp < .3f ? 0.f : (shaftHp - .3f) / .35f);
+  fuel -= dt * (.0006f + .0035f * ta) * (turbo ? 2.f : 1.f);
+  if (tankHp < .6f && fuel > 0.f) fuel -= dt * (.6f - tankHp) * .12f;                                       // fuel leak
+  if (fuel < 0.f) fuel = 0.f;
+  if (!burning && fuel > .03f && tankHp < .6f) {                                                             // ignition of a leaking tank
+    float w = .8f - tankHp, risk = 0.f;
+    if (jolt > 2.5f) risk += (jolt - 2.5f) * .24f * w;                                                       // sparks from an impact
+    if (spd > 8.f) risk += dt * .05f * w;                                                                    // scraping sparks
+    if (engTemp > 1.2f) risk += dt * .12f;                                                                   // hot engine
+    if (fx_rand() < risk) { burning = 1; fireT = 0.f; fireI = .1f; boomAt = fx_rand() < .5f ? 3.f + fx_rand() * 4.f : 1e9f; }   // 50%: it will blow up later
+  }
+  if (!burning && fuel > .03f && engTemp > 1.5f && fx_rand() < dt * .05f) { burning = 1; fireT = 0.f; fireI = .1f; boomAt = fx_rand() < .35f ? 10.f + fx_rand() * 6.f : 1e9f; }   // boiling engine catches fire
+  if (!exploded && fuel > .3f && tankHp < .35f && jolt > 12.f && fx_rand() < .35f) explode();               // very violent hit on a full, broken tank
+  if (burning) {
+    fireT += dt; fireI += (1.f - fireI) * dt * .8f; fuel -= dt * (exploded ? .02f : .025f); if (fuel < 0.f) fuel = 0.f;
+    dmg += dt * 3.f * fireI; if (dmg > 100.f) dmg = 100.f;
+    if (!exploded && fireT > boomAt && fuel > .25f) explode();
+    if (fuel < .03f || (exploded && fireT > 25.f)) { fireI -= dt * .3f; if (fireI < .04f) { fireI = 0.f; burning = 0; } }
+    if (fireT > 8.f) pw = 0.f;                                                                              // the engine bay burnt out
+  }
+  if (exploded) boomT += dt;
+  if (flashT > 0.f) flashT -= dt * 3.5f;
+  driveEff = sh * pw * (fuel > .005f ? 1.f : 0.f) * (exploded ? 0.f : 1.f);
+}
+
+// =====================================================================================================
+// ---- Physical bots. A traffic / police car close to the player is promoted from a kinematic "rail" car
+// to a complete soft-body car: same nodes, beams, panels, wheels, engine, radiator, tank, fire and
+// explosion as the player's car, running through the very same step() / fx_update() code.
+// Far away it is handed back to the rails (wrecks stay until they are far enough).
+// ---- Technique: the physics code works on the globals n, bm, nn, nb, fuel... Each vehicle owns a Ctx;
+// "entering" a bot swaps the array pointers and copies a few dozen scalars (zero-copy for the big arrays).
+#ifndef MAX_PHYS
+#define MAX_PHYS 3            // simultaneous full-physics bots: about 12 KB RAM and one more car of CPU each
+#endif
+#define BOT_MB 300            // a car without trailer uses 277 beams
+#ifndef PHYS_NEAR
+#define PHYS_NEAR 26.f        // a rail car closer than this to the player becomes a physical bot
+#endif
+#ifndef PHYS_FAR
+#define PHYS_FAR 55.f         // a healthy bot farther than this goes back on the rails
+#endif
+#ifndef PHYS_WRECK_FAR
+#define PHYS_WRECK_FAR 80.f   // a wreck is only removed when it is this far
+#endif
+#define PSRC 200              // source id of the police car
+#define CAR_R .3f             // node-vs-beam radius for car/car contacts
+typedef struct {
+  Node *n; Beam *bm;
+  int nn, nb, nbCap, nbody, nbc, ntr, nobj, nob0, trl, turbo, gearNow, burning, exploded, fxPrimed, cv, cw, cs, ce, cc;
+  int pAtt[NG], pAtt0[NG], wAtt[4];
+  float dmg, thr, brk, steer, engA, engV, engineRpm, engineOutput, latG, gsx, gsz;
+  float fuel, coolant, engTemp, radHp, tankHp, shaftHp, driveEff, fireI, fireT, boomAt, boomT, flashT, jolt, vcmx, vcmz, steamI;
+} Ctx;
+#define CTX_I(X) X(nn) X(nb) X(nbCap) X(nbody) X(nbc) X(ntr) X(nobj) X(nob0) X(trl) X(turbo) X(gearNow) X(burning) X(exploded) X(fxPrimed) X(cv) X(cw) X(cs) X(ce) X(cc)
+#define CTX_F(X) X(dmg) X(thr) X(brk) X(steer) X(engA) X(engV) X(engineRpm) X(engineOutput) X(latG) X(gsx) X(gsz) \
+  X(fuel) X(coolant) X(engTemp) X(radHp) X(tankHp) X(shaftHp) X(driveEff) X(fireI) X(fireT) X(boomAt) X(boomT) X(flashT) X(jolt) X(vcmx) X(vcmz) X(steamI)
+static void ctx_save(Ctx *c) {
+  c->n = n; c->bm = bm;
+#define S_(v) c->v = v;
+  CTX_I(S_) CTX_F(S_)
+#undef S_
+  for (int i = 0; i < NG; i++) { c->pAtt[i] = pAtt[i]; c->pAtt0[i] = pAtt0[i]; } for (int i = 0; i < 4; i++) c->wAtt[i] = wAtt[i];
+}
+static void ctx_load(const Ctx *c) {
+  n = c->n; bm = c->bm;
+#define L_(v) v = c->v;
+  CTX_I(L_) CTX_F(L_)
+#undef L_
+  for (int i = 0; i < NG; i++) { pAtt[i] = c->pAtt[i]; pAtt0[i] = c->pAtt0[i]; } for (int i = 0; i < 4; i++) wAtt[i] = c->wAtt[i];
+}
+typedef struct { Node nd[NC]; Beam bd[BOT_MB]; Ctx c; Veh veh; float spin, stuckT, steerS; uint8_t used, src; } Bot;
+static Bot bots[MAX_PHYS]; static Ctx pctx;
+static void bot_enter(Bot *b) { ctx_save(&pctx); VEH[NV] = b->veh; ctx_load(&b->c); }   // makes the bot the active vehicle
+static void bot_leave(Bot *b) { ctx_save(&b->c); ctx_load(&pctx); }                      // and gives the player back
+static void bots_clear(void) { for (int i = 0; i < MAX_PHYS; i++) bots[i].used = 0; }
+static int bots_active(void) { for (int i = 0; i < MAX_PHYS; i++) if (bots[i].used) return 1; return 0; }
+static float absf_(float v) { return v < 0 ? -v : v; }
+
+// rail geometry shared with traffic_update(): 0 = circuit (inner ring road), 2 = patrol (block around the start)
+static void rail_box(int mode, float *x0, float *x1, float *z0, float *z1) {
+  if (mode == 2) { *x0 = -26.3f; *x1 = -1.7f; *z0 = 1.7f; *z1 = 34.3f; } else { *x0 = -26.3f; *x1 = 26.3f; *z0 = -34.3f; *z1 = 34.3f; }
+}
+static void rail_point(int mode, float p, float *x, float *z) {
+  float x0, x1, z0, z1; rail_box(mode, &x0, &x1, &z0, &z1); float W = x1 - x0, H = z1 - z0, loop = 2.f * (W + H);
+  while (p >= loop) p -= loop; while (p < 0.f) p += loop;
+  if (p < H) { *x = x0; *z = z0 + p; } else if (p < H + W) { *x = x0 + p - H; *z = z1; }
+  else if (p < 2.f * H + W) { *x = x1; *z = z1 - (p - H - W); } else { *x = x1 - (p - 2.f * H - W); *z = z0; }
+}
+static float rail_phase(int mode, float x, float z) {       // closest point of the rails, as a phase
+  float x0, x1, z0, z1; rail_box(mode, &x0, &x1, &z0, &z1); float W = x1 - x0, H = z1 - z0, best = 1e9f, ph = 0, c, d;
+  c = z < z0 ? z0 : (z > z1 ? z1 : z); d = (x - x0) * (x - x0) + (z - c) * (z - c); if (d < best) { best = d; ph = c - z0; }
+  c = x < x0 ? x0 : (x > x1 ? x1 : x); d = (x - c) * (x - c) + (z - z1) * (z - z1); if (d < best) { best = d; ph = H + c - x0; }
+  c = z < z0 ? z0 : (z > z1 ? z1 : z); d = (x - x1) * (x - x1) + (z - c) * (z - c); if (d < best) { best = d; ph = H + W + z1 - c; }
+  c = x < x0 ? x0 : (x > x1 ? x1 : x); d = (x - c) * (x - c) + (z - z0) * (z - z0); if (d < best) { best = d; ph = 2.f * H + W + x1 - c; }
+  return ph;
+}
+
+// ---- driver: pure pursuit towards the rail / formation / player, with speed control and simple obstacle braking.
+// Must be called while the bot is the active vehicle. Only sets thr, brk and steer.
+static void bot_ai(Bot *b, float dt, float plx, float plz, float plhx, float plhz) {
+  float hx, hz; heading(&hx, &hz);
+  float x = (n[4].x + n[5].x) * .5f, z = (n[4].z + n[5].z) * .5f, rx = hz, rz = -hx, vf = 0;
+  for (int i = 0; i < 20; i++) vf += (n[i].vx * hx + n[i].vz * hz) * .05f;
+  int police = b->src == PSRC; float tx, tz, vt;
+  if (police) { tx = plx; tz = plz; float dx = tx - x, dz = tz - z, d = fsqrt(dx * dx + dz * dz); vt = d > 8.f ? 12.f : 6.f; }
+  else if (trafficBehavior == 1) {
+    int i = b->src; float distance = 5.f + (i / 4) * 2.5f, side = ((i % 4) - 1.5f) * 2.f;
+    tx = plx - plhx * distance + plhz * side; tz = plz - plhz * distance - plhx * side;
+    if (tx < -CITY_X_LIMIT + 3.f) tx = -CITY_X_LIMIT + 3.f; if (tx > CITY_X_LIMIT - 3.f) tx = CITY_X_LIMIT - 3.f;
+    if (tz < -CITY_Z_LIMIT + 3.f) tz = -CITY_Z_LIMIT + 3.f; if (tz > CITY_Z_LIMIT - 3.f) tz = CITY_Z_LIMIT - 3.f;
+    float dx = tx - x, dz = tz - z, d = fsqrt(dx * dx + dz * dz); vt = d * 1.3f; if (vt > 16.f) vt = 16.f; if (d < 2.f) vt = 0.f;
+  } else {
+    int mode = trafficBehavior; float ph = rail_phase(mode, x, z), look = 6.f + (vf > 0 ? vf : 0) * .6f;
+    rail_point(mode, ph + look, &tx, &tz); vt = traffic[b->src].speed * (mode == 2 ? .7f : 1.f);
+    float fx2, fz2; rail_point(mode, ph + look + 9.f, &fx2, &fz2);          // what is coming after: brake before the bend, not in it
+    float ax = fx2 - x, az = fz2 - z, al = fsqrt(ax * ax + az * az) + 1e-3f, ar = (ax * rx + az * rz) / al;
+    if (absf_(ar) > .35f && vt > 4.f) vt = 4.f;
+  }
+  float vt0 = vt, dx = tx - x, dz = tz - z, dl = fsqrt(dx * dx + dz * dz) + 1e-3f; dx /= dl; dz /= dl;
+  float er = dx * rx + dz * rz, ef = dx * hx + dz * hz;                 // target direction: right / forward components
+  float st = er > 1.f ? 1.f : (er < -1.f ? -1.f : er); if (ef < 0.f) st = er >= 0.f ? 1.f : -1.f;
+  if ((absf_(er) > .3f || ef < .3f) && vt > 4.f) vt = 4.f;               // slow down for corners
+  if ((absf_(er) > .7f || ef < 0.f) && vt > 3.f) vt = 3.f;
+  if (b->stuckT < 4.f) {                                                  // brake for what is in front (ignored when stuck so it can push through)
+    for (int k = -1; k < MAX_PHYS; k++) {
+      float ox, oz;
+      if (k < 0) { if (police || trafficBehavior == 1) continue; ox = plx; oz = plz; }
+      else { if (!bots[k].used || &bots[k] == b) continue; ox = (bots[k].nd[4].x + bots[k].nd[5].x) * .5f; oz = (bots[k].nd[4].z + bots[k].nd[5].z) * .5f; }
+      float ex = ox - x, ez = oz - z, f = ex * hx + ez * hz, l = ex * rx + ez * rz;
+      if (f > 0.f && f < 11.f && l < 2.4f && l > -2.4f) { float a = (f - 5.8f) * 1.2f; if (a < 0.f) a = 0.f; if (a < vt) vt = a; }
+    }
+  }
+  if (absf_(vf) < .4f && vt0 > 2.f) b->stuckT += dt; else if (absf_(vf) > 1.f) b->stuckT = 0.f;
+  int reversing = b->stuckT > 7.f && b->stuckT < 8.5f; if (b->stuckT >= 8.5f) b->stuckT = 0.f;
+  if (driveEff < .05f || exploded || fuel <= .005f) { thr = 0.f; brk = .15f; }   // wreck: dead engine, parked
+  else if (reversing) { thr = -.6f; brk = 0.f; st = -st; }
+  else {
+    float e = vt - vf; thr = e > 0.f ? (e * .6f > 1.f ? 1.f : e * .6f) : 0.f;
+    brk = e < -1.f ? ((-e - 1.f) * .15f > 1.f ? 1.f : (-e - 1.f) * .15f) : 0.f;
+  }
+  float smax = .5f / (1.f + absf_(vf) * .05f), k = dt * 6.f > .5f ? .5f : dt * 6.f;
+  b->steerS += (st * smax - b->steerS) * k; steer = b->steerS;
+}
+
+static int bot_clear_at(float x, float z, float *plc) {     // free space to spawn a car? plc = player center
+  float dx = x - plc[0], dz = z - plc[1], lim = ntr >= 0 ? 10.f : 6.5f;
+  if (dx * dx + dz * dz < lim * lim) return 0;
+  if (ntr >= 0) { dx = x - n[ntr + 4].x; dz = z - n[ntr + 4].z; if (dx * dx + dz * dz < 36.f) return 0; }
+  for (int i = 0; i < MAX_PHYS; i++) if (bots[i].used) { dx = x - (bots[i].nd[4].x + bots[i].nd[5].x) * .5f; dz = z - (bots[i].nd[4].z + bots[i].nd[5].z) * .5f; if (dx * dx + dz * dz < 36.f) return 0; }
+  return 1;
+}
+static void bot_spawn(int slot, int src, float x, float z, float hx, float hz, float speed) {
+  static const uint8_t CR[8] = {200, 40, 215, 185, 65, 230, 110, 175}, CG[8] = {48, 135, 170, 90, 165, 180, 90, 140}, CB[8] = {40, 55, 45, 40, 70, 65, 180, 60};
+  Bot *b = &bots[slot]; Ctx *c = &b->c; int police = src == PSRC;
+  b->used = 1; b->src = (uint8_t)src; b->spin = b->stuckT = b->steerS = 0.f;
+  b->veh = VEH[police ? 1 : src & 3];                                    // berline / sport / pick-up / buggy
+  if (police) { b->veh.r = 235; b->veh.g = 235; b->veh.b = 228; } else { b->veh.r = CR[src & 7]; b->veh.g = CG[src & 7]; b->veh.b = CB[src & 7]; }
+  for (unsigned i = 0; i < sizeof(Ctx); i++) ((char *)c)[i] = 0;
+  c->n = b->nd; c->bm = b->bd; c->nbCap = BOT_MB; c->cv = NV; c->cw = 0; c->cs = 1; c->ce = police ? 2 : (src & 1); c->cc = 0; c->ntr = -1;
+  bot_enter(b);
+  car_init(x, z, hx, hz, .12f, 0);
+  for (int i = 0; i < nn; i++) { n[i].vx = hx * speed; n[i].vz = hz * speed; }
+  bot_leave(b);
+}
+static void bot_release(Bot *b) {
+  TrafficCar *car = b->src == PSRC ? &policeCar : &traffic[b->src];
+  if (b->src != PSRC && trafficBehavior != 1) car->phase = rail_phase(trafficBehavior, car->x, car->z);   // back on the nearest rail point
+  car->bot = 0; b->used = 0;
+}
+
+// once per frame: release far bots, drive and update the active ones, promote at most one new rail car
+static void bots_frame(float dt) {
+  if (mapId != 3) return;
+  float hx0, hz0; heading(&hx0, &hz0);
+  float plc[2] = {(n[4].x + n[5].x) * .5f, (n[4].z + n[5].z) * .5f};
+  for (int s = 0; s < MAX_PHYS; s++) {
+    Bot *b = &bots[s]; if (!b->used) continue;
+    int police = b->src == PSRC; TrafficCar *car = police ? &policeCar : &traffic[b->src];
+    if (police ? !pursuitEnabled : (!trafficEnabled || b->src >= trafficCount)) { bot_release(b); continue; }
+    bot_enter(b);
+    bot_ai(b, dt, plc[0], plc[1], hx0, hz0);
+    fx_update(dt);
+    float hx, hz; heading(&hx, &hz);
+    float cx = (n[4].x + n[5].x) * .5f, cz = (n[4].z + n[5].z) * .5f, cy = n[4].y, vf = 0;
+    for (int i = 0; i < 20; i++) vf += (n[i].vx * hx + n[i].vz * hz) * .05f;
+    int wreck = dmg > 55.f || burning || exploded || driveEff < .1f;
+    b->spin += vf * dt / .35f;
+    bot_leave(b);
+    car->x = cx; car->z = cz; car->hx = hx; car->hz = hz;                // mirror for the rest of the game (culling, sorting)
+    float dx = cx - plc[0], dz = cz - plc[1], lim = wreck ? PHYS_WRECK_FAR : PHYS_FAR;
+    if (dx * dx + dz * dz > lim * lim || cy < -20.f) bot_release(b);
+  }
+  if (dt <= 0.f) return;
+  int slot = -1; for (int s = 0; s < MAX_PHYS; s++) if (!bots[s].used) { slot = s; break; }
+  if (slot < 0) return;
+  if (trafficEnabled) for (int i = 0; i < trafficCount; i++) {
+    TrafficCar *car = &traffic[i]; if (car->bot) continue;
+    float dx = car->x - plc[0], dz = car->z - plc[1], hl = car->hx * car->hx + car->hz * car->hz;
+    if (dx * dx + dz * dz > PHYS_NEAR * PHYS_NEAR || hl < .5f || !bot_clear_at(car->x, car->z, plc)) continue;
+    float v = trafficBehavior == 1 ? 0.f : car->speed * (trafficBehavior == 2 ? .7f : 1.f);
+    bot_spawn(slot, i, car->x, car->z, car->hx, car->hz, v); car->bot = (uint8_t)(slot + 1); return;
+  }
+  if (pursuitEnabled && !policeCar.bot) {
+    float dx = policeCar.x - plc[0], dz = policeCar.z - plc[1];
+    if (dx * dx + dz * dz < (PHYS_NEAR + 4.f) * (PHYS_NEAR + 4.f) && bot_clear_at(policeCar.x, policeCar.z, plc)) {
+      bot_spawn(slot, PSRC, policeCar.x, policeCar.z, policeCar.hx, policeCar.hz, 6.f); policeCar.bot = (uint8_t)(slot + 1);
+    }
+  }
+}
+
+// ---- car / car contacts: the nodes of one car against the beams of the other (same scheme as objects vs car in step())
+typedef struct { Node *n; Beam *bm; int nbc, ntr; float cx, cz, rad; } VRef;
+static void node_vs_car(Node *p, const VRef *B) {
+  float dcx = p->x - B->cx, dcz = p->z - B->cz; if (dcx * dcx + dcz * dcz > B->rad * B->rad) return;
+  for (int i = 0; i < B->nbc; i++) {
+    Beam *b = &B->bm[i]; if (b->f > 1) continue;
+    Node *a = &B->n[b->a], *q = &B->n[b->b];
+    float ex = q->x - a->x, ey = q->y - a->y, ez = q->z - a->z, el = ex * ex + ey * ey + ez * ez + 1e-6f;
+    float t = ((p->x - a->x) * ex + (p->y - a->y) * ey + (p->z - a->z) * ez) / el; t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    float dx = p->x - (a->x + t * ex), dy = p->y - (a->y + t * ey), dz = p->z - (a->z + t * ez), d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 >= CAR_R * CAR_R) continue;
+    float d = fsqrt(d2) + 1e-5f, nx = dx / d, ny = dy / d, nz = dz / d, pen = CAR_R - d; if (pen > .15f) pen = .15f;
+    float imq = a->im * (1 - t) * (1 - t) + q->im * t * t, it = p->im + imq, cp = pen / it;
+    p->x += nx * cp * p->im; p->y += ny * cp * p->im; p->z += nz * cp * p->im;
+    a->x -= nx * cp * a->im * (1 - t); a->y -= ny * cp * a->im * (1 - t); a->z -= nz * cp * a->im * (1 - t);
+    q->x -= nx * cp * q->im * t; q->y -= ny * cp * q->im * t; q->z -= nz * cp * q->im * t;
+    float vqx = a->vx * (1 - t) + q->vx * t, vqy = a->vy * (1 - t) + q->vy * t, vqz = a->vz * (1 - t) + q->vz * t;
+    float vn = (p->vx - vqx) * nx + (p->vy - vqy) * ny + (p->vz - vqz) * nz;
+    if (vn < 0) { float jj = -1.15f * vn / it;
+      p->vx += nx * jj * p->im; p->vy += ny * jj * p->im; p->vz += nz * jj * p->im;
+      a->vx -= nx * jj * a->im * (1 - t); a->vy -= ny * jj * a->im * (1 - t); a->vz -= nz * jj * a->im * (1 - t);
+      q->vx -= nx * jj * q->im * t; q->vy -= ny * jj * q->im * t; q->vz -= nz * jj * q->im * t; }
+  }
+}
+static void car_hits(const VRef *A, const VRef *B) {
+  for (int i = 0; i < 50; i++) node_vs_car(&A->n[i], B);                // structure, panels, wheels (not the engine / seats inside)
+  if (A->ntr >= 0) for (int i = A->ntr; i < A->ntr + 11; i++) node_vs_car(&A->n[i], B);
+}
+static void cars_collide(void) {
+  VRef v[MAX_PHYS + 1]; int m = 0;
+  v[m++] = (VRef){n, bm, nbc, ntr, (n[4].x + n[5].x) * .5f, (n[4].z + n[5].z) * .5f, ntr >= 0 ? 10.f : 3.8f};
+  for (int s = 0; s < MAX_PHYS; s++) if (bots[s].used) v[m++] = (VRef){bots[s].nd, bots[s].bd, bots[s].c.nbc, -1, (bots[s].nd[4].x + bots[s].nd[5].x) * .5f, (bots[s].nd[4].z + bots[s].nd[5].z) * .5f, 3.8f};
+  for (int a = 0; a < m; a++) for (int c = a + 1; c < m; c++) {
+    float dx = v[a].cx - v[c].cx, dz = v[a].cz - v[c].cz, lim = v[a].rad + v[c].rad + .5f;
+    if (dx * dx + dz * dz > lim * lim) continue;
+    car_hits(&v[a], &v[c]); car_hits(&v[c], &v[a]);
+  }
+}
+// one physics sub-step for the whole scene: the player, every active bot, then the contacts between cars
+static void world_step(float dt) {
+  step(dt);
+  if (!bots_active()) return;
+  ctx_save(&pctx);
+  for (int s = 0; s < MAX_PHYS; s++) if (bots[s].used) { Bot *b = &bots[s]; ctx_load(&b->c); step(dt); ctx_save(&b->c); }
+  ctx_load(&pctx);
+  cars_collide();
 }
