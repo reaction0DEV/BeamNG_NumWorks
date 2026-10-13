@@ -7,7 +7,7 @@ Tout tourne en temps réel sur la calculatrice : rendu 3D logiciel, physique de 
 
 # Télécharger
 
-📥 **Télécharger NumBeam 3D :** [Cliquez ici pour obtenir directement le fichier(`FR.NumBeam3D.nwa`)](https://github.com)
+📥 **Télécharger NumBeam 3D :** [Cliquez ici pour obtenir directement le fichier(`FR.NumBeam3D.nwa`)](https://github.com/reaction0DEV/BeamNG_NumWorks/releases/download/V1.1/FR.NumBeam3D.nwa))
 
 
 ## Points forts
