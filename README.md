@@ -1,3 +1,9 @@
+---
+
+> 🌍 **Version Française disponible !** Pour lire la documentation en français, [cliquez ici](./NumBeam3D_FR/README.md).
+
+---
+
 # NumBeam3D
 
 Driving and crash simulator in 3D with **beam-based deformation physics** (BeamNG style), written in C for the **NumWorks** calculator (external application, `.nwa`).
