@@ -1,5 +1,3 @@
----
-
 > 🌍 **Version Française disponible !** Pour lire la documentation en français, [cliquez ici](./NumBeam3D_FR/README.md).
 
 ---
