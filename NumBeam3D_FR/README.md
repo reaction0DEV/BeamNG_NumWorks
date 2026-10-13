@@ -5,6 +5,11 @@ Tout tourne en temps réel sur la calculatrice : rendu 3D logiciel, physique de 
 
 > Voici la **version française** : le texte du jeu est en français et en ASCII (la police de la calculatrice ne gère pas les accents). La version anglaise est dans le dossier `NumBeam3D_EN`.
 
+# Télécharger
+
+📥 **Télécharger NumBeam 3D :** [Cliquez ici pour obtenir directement le fichier(`FR.NumBeam3D.nwa`)](https://github.com)
+
+
 ## Points forts
 
 - **Carrosserie déformable** : la voiture est un maillage de nœuds et de poutres. Elle se plie, se casse, perd ses vitres, ses rétroviseurs et ses pare-chocs.
