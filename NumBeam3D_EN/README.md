@@ -1,9 +1,18 @@
+> 🌍 **Version Française disponible !** Pour lire la documentation en français, [cliquez ici](./NumBeam3D_FR/README.md).
+
+---
+
 # NumBeam3D
 
 Driving and crash simulator in 3D with **beam-based deformation physics** (BeamNG style), written in C for the **NumWorks** calculator (external application, `.nwa`).
 Everything runs in real time on the calculator: software 3D rendering, deformable body physics, traffic, weather, challenges and record saving.
 
 > This is the **English version**: the in-game text is in English and ASCII only (the calculator font has no accents). The French version is in the `NumBeam3D_FR` folder.
+
+# Download
+
+📥 **Download NumBeam 3D :** [Click here to download the latest version(`EN.NumBeam3D.nwa`)](https://github.com/reaction0DEV/BeamNG_NumWorks/releases/download/V1.2/EN.NumBeam3D.nwa)
+
 
 ## Highlights
 
