@@ -40,8 +40,31 @@ Règles :
 - Texte entre `"guillemets"` ou `'apostrophes'`. **Pas d'accents** dans les noms de fonctions et d'options. Dans les textes affichés évite-les aussi (la police du jeu ne les gère pas).
 - Couleurs et positions sont des tuples : `(255, 0, 0)`, `(x, z)`.
 - `True`, `False`, `None` et `pi` existent. `#` commence un commentaire. Les lignes `import ...` / `from ... import ...` sont ignorées.
-- Les noms de fonctions et d'options ne tiennent pas compte des majuscules. Les **noms d'options inconnus sont signalés** (faute de frappe).
+- Les options peuvent aussi s'écrire **en anglais** (voir le tableau ci-dessous) ; on peut mélanger les deux langues. Les noms de fonctions et d'options ne tiennent pas compte des majuscules. Les **noms d'options inconnus sont signalés** (faute de frappe).
 - Les valeurs hors limites sont **ramenées à la limite** sans erreur.
+
+### Noms d'options en anglais
+
+| Français | Anglais | Français | Anglais |
+|---|---|---|---|
+| `nom` | `name` | `largeur` | `width` |
+| `hauteur` | `height` | `longueur` | `length` |
+| `masse` | `mass` | `puissance` | `power` |
+| `couleur` | `color` / `colour` | `propulseur` | `thruster` |
+| `sol` | `ground` | `depart` | `start` |
+| `collines` | `hills` | `gravite` | `gravity` |
+| `adherence` | `traction` | `rayon` | `radius` |
+| `saut` | `jump` | `reparer` | `repair` |
+| `essence` | `fuel` | `duree` | `duration` |
+| `carte` | `map` | `vehicule` | `vehicle` |
+| `moteur` | `engine` | `roues` | `wheels` |
+| `remorque` | `trailer` | `meteo` | `weather` |
+| `trafic` | `traffic` | `vitesse_max` | `max_speed` |
+| `adherence_laterale` | `lateral_grip` | `turbo_vitesse` | `turbo_speed` |
+| `freinage` | `braking` | `braquage` | `steering` |
+| `frein_moteur` | `engine_braking` | | |
+
+Les fonctions `vehicle`, `map`, `ramp`, `hills`, `loop`, `object`, `start` et `power` existaient déjà. Les noms de moteurs, roues, objets, etc. restent ceux affichés par le jeu (version française : `"Tout-terrain"`, `"baril"`...).
 
 ### Limites
 

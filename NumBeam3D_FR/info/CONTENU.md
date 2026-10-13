@@ -72,7 +72,7 @@ Premier crash, Petite balade, Livreur, Marche arrière express, Drifteur, Premie
 
 - Caméra libre (gauche/droite/haut/bas, zoom, reset), vue **habitacle**, vue **du dessus** avec dégâts
 - Affichage **filaire des poutres**
-- **Mini-carte** de la ville (coin ou plein écran, petites/normales/grandes icônes) : voiture, destination, police, événements
+- **Mini-carte** de la ville (coin ou plein écran, petites/normales/grandes icônes) : voiture, destination, police, événements ; sur la carte **Italie**, mini-carte défilante centrée sur la voiture : route, villages, objets
 - HUD : vitesse, rapport, régime, carburant, indicateurs de systèmes
 - Qualité (Basse / Normale / Haute), champ de vision (Étroit / Normal / Large), distance de vue (Courte / Normale / Longue), traces de pneus et particules réglables
 - Garage 3D avec voiture à inspecter
@@ -82,7 +82,7 @@ Premier crash, Petite balade, Livreur, Marche arrière express, Drifteur, Premie
 - **Menu principal** : Jouer, Carte, Garage, Défis, Profil, Options, Quitter
 - **Options** : Mode, Véhicule, Monde, Conduite, Affichage, Outils (en jeu), Système, Modes perso, Favoris
 - **Mode Simple / Avancé** (le mode Avancé affiche des réglages supplémentaires)
-- **Menu rapide** en jeu avec 37 actions : Réparer tout, Turbo, Boost, Voiture, Moteur, Remorque, Route, Gravité, Temps, Retour au départ, Trafic IA, Nombre IA, Comportement IA, Vitesse IA, Plan de ville, Météo, Puissance, Adhérence, Suspension, Freinage, Poursuite police, Test (percer > feu > boom), Saut, Stop (frein d'urgence), Roues, Carte, Boîte de vitesses, Crevaison, Embrayage, Ceinture, Airbags, Événements, Mini-carte, Icônes carte, Carrosserie cassable, Consommation, Plein d'essence
+- **Menu rapide** en jeu avec 38 actions : Réparer tout, Turbo, Boost, Voiture, Moteur, Remorque, Route, Gravité, Temps, Retour au départ, Trafic IA, Nombre IA, Comportement IA, Vitesse IA, Plan de ville, Météo, Puissance, Adhérence, Suspension, Freinage, Poursuite police, Test (percer > feu > boom), Saut, Stop (frein d'urgence), Roues, Carte, Boîte de vitesses, Crevaison, Embrayage, Ceinture, Airbags, Événements, Mini-carte, Icônes carte, Carrosserie cassable, Consommation, Plein d'essence, Objets sur la route
 - **Favoris** : 8 emplacements personnalisables (Shift pour ajouter une ligne)
 - **Commandes reconfigurables** : 35 actions liées aux touches de la calculatrice
 - Pages **Défis**, **Profil** (Statistiques, Succès)
@@ -91,6 +91,8 @@ Premier crash, Petite balade, Livreur, Marche arrière express, Drifteur, Premie
 
 Vitesse max, Accélération, Adhérence latérale, Gravité, Adhérence globale, Turbo vitesse, Turbo accélération, Freinage, Braquage, Frein moteur. Enregistrés dans un fichier de config séparé des records.
 
+**Débridage de sécurité** (Options → Système → Variables dev) : retire les limites min/max. OK sur une variable ouvre une saisie libre au clavier (0-9, point, signe moins ; Effacer corrige, champ vide + Effacer = valeur par défaut). Seule limite restante : ±100000 pour éviter les valeurs infinies. Attention : des valeurs extrêmes peuvent faire exploser la physique.
+
 ## 10. Mods par scripts Python
 
 Fonctions : `vehicule`, `carte`, `rampe`, `colline`, `boucle`, `objet`, `depart`, `pouvoir`, `mode`, plus variables et calculs simples.
@@ -98,7 +100,7 @@ Fonctions : `vehicule`, `carte`, `rampe`, `colline`, `boucle`, `objet`, `depart`
 - **Modes** : carte, véhicule, moteur, roues, suspension, châssis, remorque, météo, trafic et réglages dev imposés
 - Limites : 8 véhicules, 4 cartes (16 rampes, 4 loopings, 12 objets chacune), 8 pouvoirs, 8 modes, 16 variables
 - Rechargement à chaud, erreurs signalées avec nom de fichier et numéro de ligne
-- Détails : `MANUEL_MODS.md`, exemple : `exemple_mods.py`
+- Les options peuvent aussi s'écrire en anglais (`name`, `width`, `max_speed`, `gravity`...). Détails : `MANUEL_MODS.md`, exemple : `exemple_mods.py`
 
 ## 11. Sauvegarde et système
 

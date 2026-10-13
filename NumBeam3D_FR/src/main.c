@@ -16,7 +16,7 @@ static int lw = 160, lh = 112, hor = 44; static float foc = 130.f, zmax = 72.f, 
 #define BGC C(18, 19, 22)       // dark UI background
 #define PNL C(26, 27, 32)       // panel row
 #define PSEL C(58, 36, 20)      // selected row
-enum { S_MENU, S_GARAGE, S_GAME, S_PAUSE, S_DMG, S_PAGE, S_CTRL, S_KEYS, S_DELIV, S_DRES, S_STATS, S_ACH };
+enum { S_MENU, S_GARAGE, S_GAME, S_PAUSE, S_DMG, S_PAGE, S_CTRL, S_KEYS, S_DELIV, S_DRES, S_STATS, S_ACH, S_NUM };
 static uint16_t fb[MAXW * MAXH], buf[320 * 8]; static uint8_t zb[MAXW * MAXH], xmap[320];
 static int structure, CXc = 80, curZ = -1, showTop = 1, crashI = 2, camInterior;
 typedef struct { float x, z, h; int kind; } CityBlock;
@@ -1566,6 +1566,23 @@ static void draw_minimap(int top) {                    // top = 0: map and event
   { int r = rr, px0 = ox + (int)((cx + CITY_X_LIMIT) * s), py0 = oy + (int)((CITY_Z_LIMIT - cz) * s);   // you, with your heading
     line(px0, py0, px0 + (int)(hx * (r + 4)), py0 - (int)(hz * (r + 4)), 0xFFFF); disc(px0, py0, r, C(60, 180, 255)); }
 }
+static void draw_minimap_it(void) {                    // Italy: scrolling map centred on the car (north up): road, villages, objects, you
+  int full = optMap == 2; float hx, hz, cx, cy, cz; frame(&hx, &hz, &cx, &cy, &cz);
+  curZ = -1; blendA = 0; clipOn = 0;
+  int mw = full ? lw - 4 : 40, mh = full ? lh - 4 : 62, ox = full ? 2 : 3, oy = full ? 2 : 3; float sc = full ? .8f : .42f;
+  frect(ox - 1, oy - 1, mw + 2, mh + 2, C(96, 104, 116)); frect(ox, oy, mw, mh, C(58, 92, 52));
+  clipOn = 1; clX0 = ox; clY0 = oy; clX1 = ox + mw; clY1 = oy + mh;
+  float hz2 = mh * .5f / sc; int rw = full ? 3 : 2;
+  for (int j = 0; j < mh; j++) { float z = cz + (mh / 2 - j) / sc; int rx = ox + mw / 2 + (int)((it_xc(z) - cx) * sc + (it_xc(z) - cx >= 0 ? .5f : -.5f)); frect(rx - rw, oy + j, 2 * rw + 1, 1, C(150, 150, 146)); frect(rx, oy + j, 1, 1, (j & 3) < 2 ? C(220, 200, 90) : C(150, 150, 146)); }
+  for (int c = it_cz(cz - hz2); c <= it_cz(cz + hz2); c++) { int vm = ((c % 12) + 12) % 12; if (vm != 5 && vm != 6) continue;   // villages
+    float zc = c * IT_CL + 15.f, xr = it_xc(zc);
+    for (int sd = -1; sd <= 1; sd += 2) { int bx = ox + mw / 2 + (int)((xr + sd * 14.f - cx) * sc), by = oy + mh / 2 - (int)((zc - cz) * sc); int bw = (int)(11.f * sc) + 1, bh = (int)(26.f * sc) + 1;
+      frect(bx - bw / 2, by - bh / 2, bw, bh, vm == 6 ? C(226, 206, 160) : C(192, 126, 86)); } }
+  for (int o = 0; o < nobj; o++) if (!objDead[o]) { const Node *q = &n[nob0 + o * 8]; frect(ox + mw / 2 + (int)((q->x - cx) * sc) - 1, oy + mh / 2 - (int)((q->z - cz) * sc) - 1, 2, 2, C(255, 140, 30)); }
+  { int r = (full ? 2 : 1) + mmIcon, px0 = ox + mw / 2, py0 = oy + mh / 2;
+    line(px0, py0, px0 + (int)(hx * (r + 4)), py0 - (int)(hz * (r + 4)), 0xFFFF); disc(px0, py0, r, C(60, 180, 255)); }
+  clipOn = 0;
+}
 static void draw_deliv_hud(void) {
   curZ = -1; blendA = 0; if (delEnd) return;
   float hx, hz, cx, cy, cz; frame(&hx, &hz, &cx, &cy, &cz);
@@ -1753,9 +1770,9 @@ static void dev_apply(void) {                                                // 
 }
 static void dev_reset(int i) { devSet &= (uint16_t)~(1u << i); *DEVP[i] = dev_def(i); dev_apply(); }
 static void dev_reset_all(void) { devSet = 0; for (int i = 0; i < NDEV; i++) *DEVP[i] = dev_def(i); dev_apply(); }
-#define QUICK_COUNT 37
+#define QUICK_COUNT 38
 // identifiants (anciens 0-21 conserves, nouveaux 22-25)
-static const char *QL[QUICK_COUNT] = {"Reparer tout", "Turbo", "Boost !", "Voiture", "Moteur", "Remorque", "Route", "Gravite", "Temps", "Retour au depart", "Trafic IA", "Nombre IA", "Comportement IA", "Vitesse IA", "Plan de ville", "Meteo", "Puissance", "Adherence", "Suspension", "Freinage", "Poursuite police", "Test: percer>feu>boom", "Saut !", "Stop (frein d'urgence)", "Roues", "Carte", "Boite de vitesses", "Crevaison", "Embrayage", "Ceinture", "Airbags", "Evenements (OK: refaire)", "Mini-carte", "Icones carte", "Carrosserie cassable", "Consommation", "Plein d'essence"};
+static const char *QL[QUICK_COUNT] = {"Reparer tout", "Turbo", "Boost !", "Voiture", "Moteur", "Remorque", "Route", "Gravite", "Temps", "Retour au depart", "Trafic IA", "Nombre IA", "Comportement IA", "Vitesse IA", "Plan de ville", "Meteo", "Puissance", "Adherence", "Suspension", "Freinage", "Poursuite police", "Test: percer>feu>boom", "Saut !", "Stop (frein d'urgence)", "Roues", "Carte", "Boite de vitesses", "Crevaison", "Embrayage", "Ceinture", "Airbags", "Evenements (OK: refaire)", "Mini-carte", "Icones carte", "Carrosserie cassable", "Consommation", "Plein d'essence", "Objets sur la route"};
 static int lastQid = 0, lastQd = 1;                      // derniere option utilisee (touche "Refaire option rapide")
 static void qdesc(int id, char *s) {        // texte d'une option rapide (nom + valeur)
   static const char *RN[3] = {"Seche", "Mouillee", "Glace"}, *GN[3] = {"Normale", "Lune", "Forte"};
@@ -1774,10 +1791,11 @@ static void qdesc(int id, char *s) {        // texte d'une option rapide (nom + 
     else if (id == 28) cat(p, clutchAssist ? ": Assistee" : ": Manuelle"); else if (id == 29) cat(p, beltOn ? ": bouclee" : ": detachee"); else if (id == 30) cat(p, airbagsOn ? ": actifs" : ": desactives");
     else if (id == 27) { int c = 0; for (int w = 0; w < 4; w++) c += tpLeak[w]; p = cat(p, ": "); p = num(p, c); cat(p, "/4 (OK)"); }
     if (id == 31) cat(p, optEvents ? (mapId == 3 ? ": oui" : ": oui (Ville)") : ": non");
-    if (id == 32) { p = cat(p, ": "); cat(p, MMN[optMap]); if (mapId != 3 && optMap) cat(p, " (Ville)"); }
+    if (id == 32) { p = cat(p, ": "); cat(p, MMN[optMap]); if (mapId != 3 && mapId != 5 && optMap) cat(p, " (Ville, Italie)"); }
     if (id == 33) { p = cat(p, ": "); cat(p, MMI[mmIcon]); }
     if (id == 34) cat(p, optBody ? ": oui" : ": non");
     if (id == 35) { p = cat(p, ": x"); num(p, fuelX); }
+    if (id == 37) cat(p, optObj ? ": oui" : ": non (retire)");
 }
 // applique une option rapide. ok = OK appuye (requis pour les actions "ponctuelles"). Retour : bit0 = fermer le menu, bit1 = remettre les tours a zero
 static int quick_apply(int id, int d, int ok) {
@@ -1808,6 +1826,7 @@ static int quick_apply(int id, int d, int ok) {
   else if (id == 33) mmIcon = (mmIcon + 3 + d) % 3;
   else if (id == 34) body_toggle();
   else if (id == 36 && ok) { fuel = 1.f; close = 1; }
+  else if (id == 37) { optObj ^= 1; if (!optObj) objects_clear(); }   // remis au prochain depart
   else if (id == 35) fuelX = fuelX == 1 ? 3 : (fuelX == 3 ? 6 : 1);
   else if (id == 31) { if (ok) { optEvents = 1; events_new(!tutOn); close = 1; } else { optEvents ^= 1; if (optEvents) events_new(!tutOn); else ev_clear(); } }
   else if (id == 15) { weatherMode = (weatherMode + 4 + d) % 4; }
@@ -1827,7 +1846,7 @@ static int quick_apply(int id, int d, int ok) {
 // Les lignes marquees AV n'apparaissent qu'en mode Avance. Shift = ajouter/retirer des favoris. Les favoris s'ouvrent avec la touche "menu rapide".
 #define AV 0x8000u
 enum { P_FAV, P_OPT, P_VEH, P_WORLD, P_DRIVE, P_DISP, P_TOOLS, P_SYS, P_DEV, P_CHALL, P_PROF, P_MODS, NPAGE };
-enum { O_QUAL = 40, O_STEER, O_CAM, O_FOV, O_VIEW, O_SKID, O_PART, O_OBJ, O_RAMP, O_PUNCT, O_KEYS, O_CTRL, O_SOLID, O_MODE, O_DEV, O_CRASHV, O_FAVRESET, O_DEVRESET, O_TUTO, O_DELIV, O_STATS, O_ACH, O_MODINFO, O_MODRELOAD };
+enum { O_QUAL = 40, O_STEER, O_CAM, O_FOV, O_VIEW, O_SKID, O_PART, O_OBJ, O_RAMP, O_PUNCT, O_KEYS, O_CTRL, O_SOLID, O_MODE, O_DEV, O_CRASHV, O_FAVRESET, O_DEVRESET, O_TUTO, O_DELIV, O_STATS, O_ACH, O_MODINFO, O_MODRELOAD, O_UNLOCK };
 #define NAV(p) (100 + (p))
 #define DV(i) (128 + (i))
 #define NFAV 8
@@ -1835,12 +1854,12 @@ static const char *const PGN[NPAGE] = {"FAVORIS", "OPTIONS", "VEHICULE", "MONDE"
 static const char *const PGL[NPAGE] = {"Favoris", "Options", "Vehicule", "Monde", "Conduite", "Affichage", "Outils (en jeu)", "Systeme", "Variables dev", "Defis", "Profil", "Modes perso"};
 static const uint16_t PT_OPT[] = {O_MODE, NAV(P_VEH), NAV(P_WORLD), NAV(P_DRIVE), NAV(P_DISP), NAV(P_TOOLS), NAV(P_SYS), NAV(P_MODS), NAV(P_FAV)};
 static const uint16_t PT_VEH[] = {3, 4, 24, 5, O_SOLID, 26, 28 | AV, 16 | AV, 17 | AV, 18 | AV, 19 | AV, 35 | AV, 34 | AV, 29 | AV, 30 | AV};
-static const uint16_t PT_WORLD[] = {25, 6, 15, 7, 10, 11, 31, 12 | AV, 13 | AV, 20 | AV, 14 | AV, O_OBJ | AV, O_RAMP | AV};
+static const uint16_t PT_WORLD[] = {25, 6, 15, 7, 10, 11, 31, O_OBJ, 12 | AV, 13 | AV, 20 | AV, 14 | AV, O_RAMP | AV};
 static const uint16_t PT_DRIVE[] = {8, 1, O_STEER, O_CAM, O_CTRL, O_PUNCT | AV};
 static const uint16_t PT_DISP[] = {O_QUAL, 32, 33 | AV, O_FOV | AV, O_VIEW | AV, O_SKID | AV, O_PART | AV};
 static const uint16_t PT_TOOLS[] = {0, 36, 2, 22, 23, 9, 27 | AV, 21 | AV};
 static const uint16_t PT_SYS[] = {O_KEYS | AV, O_DEV | AV, NAV(P_DEV), O_FAVRESET | AV};
-static const uint16_t PT_DEV[] = {DV(0), DV(1), DV(2), DV(3), DV(4), DV(5), DV(6), DV(7), DV(8), DV(9), O_DEVRESET};
+static const uint16_t PT_DEV[] = {DV(0), DV(1), DV(2), DV(3), DV(4), DV(5), DV(6), DV(7), DV(8), DV(9), O_UNLOCK, O_DEVRESET};
 static const uint16_t PT_CHALL[] = {O_DELIV, O_TUTO, O_CRASHV, NAV(P_MODS)};
 static const uint16_t PT_PROF[] = {O_STATS, O_ACH};
 #define PLEN(t) ((uint8_t)(sizeof(t) / sizeof((t)[0])))
@@ -1885,10 +1904,16 @@ static char *fmtf(char *p, float v, int dec) {
   if (dec) { *p++ = '.'; int f = q % mul; for (int dv = mul / 10; dv >= 1; dv /= 10) *p++ = (char)('0' + f / dv % 10); *p = 0; }
   return p;
 }
+static int devUnlock;                                       // debridage: plus aucune limite de securite sur les variables dev (valeur libre)
+static char numBuf[12]; static int numLen, numI;            // saisie directe d une valeur (etat S_NUM)
+#define DEV_BIG 100000.f                                    // seule limite restante: evite les valeurs infinies / NaN
+static float dev_lo(int i) { return devUnlock ? -DEV_BIG : DEVM[i].lo; }
+static float dev_hi(int i) { return devUnlock ? DEV_BIG : DEVM[i].hi; }
+static void dev_set(int i, float v) { if (!(v == v)) return; if (v < dev_lo(i)) v = dev_lo(i); if (v > dev_hi(i)) v = dev_hi(i); devOv[i] = v; devSet |= (uint16_t)(1u << i); *DEVP[i] = v; }
+static void dev_unlock_off(void) { for (int i = 0; i < NDEV; i++) if ((devSet >> i) & 1) { float v = devOv[i]; if (v < DEVM[i].lo) v = DEVM[i].lo; if (v > DEVM[i].hi) v = DEVM[i].hi; devOv[i] = v; } dev_apply(); }   // on remet les valeurs dans les limites normales
 static void dev_edit(int i, int d, int mul) {
   if (!devOn) { pgMsg = "Active le mode developpeur"; pgMsgT = 40; return; }
-  float v = *DEVP[i] + (float)(d * mul) * DEVM[i].st; if (v < DEVM[i].lo) v = DEVM[i].lo; if (v > DEVM[i].hi) v = DEVM[i].hi;
-  devOv[i] = v; devSet |= (uint16_t)(1u << i); *DEVP[i] = v;
+  dev_set(i, *DEVP[i] + (float)(d * mul) * DEVM[i].st);
 }
 // ---- lecteur de scripts: un sous-ensemble de Python (appels de fonctions, variables, + - * / **, tuples, commentaires). Rien n'est execute: le script est seulement lu.
 typedef struct { float f[4]; int n; const char *s; int sl; } MV;          // valeur: nombre / tuple (f, n) ou texte (s, sl)
@@ -1994,6 +2019,12 @@ static int mq_expr(MV *v) {
   }
 }
 // arguments de l'appel en cours: position (0 = premier) ou mot-cle
+// noms d'options en anglais -> nom interne (les scripts peuvent melanger francais et anglais)
+static const char *const MQA[][2] = {{"name", "nom"}, {"width", "largeur"}, {"height", "hauteur"}, {"length", "longueur"}, {"mass", "masse"}, {"power", "puissance"}, {"color", "couleur"}, {"colour", "couleur"}, {"thruster", "propulseur"},
+  {"ground", "sol"}, {"start", "depart"}, {"hills", "collines"}, {"gravity", "gravite"}, {"traction", "adherence"}, {"radius", "rayon"}, {"jump", "saut"}, {"repair", "reparer"}, {"fuel", "essence"}, {"duration", "duree"},
+  {"map", "carte"}, {"vehicle", "vehicule"}, {"engine", "moteur"}, {"wheels", "roues"}, {"trailer", "remorque"}, {"weather", "meteo"}, {"traffic", "trafic"},
+  {"max_speed", "vitesse_max"}, {"lateral_grip", "adherence_laterale"}, {"turbo_speed", "turbo_vitesse"}, {"turbo_acceleration", "turbo_acceleration"}, {"braking", "freinage"}, {"steering", "braquage"}, {"engine_braking", "frein_moteur"}};
+static const char *mq_alias(const char *k) { for (unsigned i = 0; i < sizeof MQA / sizeof MQA[0]; i++) { const char *a = MQA[i][0], *b = k; while (*a && *a == *b) { a++; b++; } if (!*a && !*b) return MQA[i][1]; } return k; }
 static const MV *marg(const char *k, int pos) { for (int i = 0; i < mnk; i++) if (mq_eq(mkw[i].k, k)) return &mkw[i].v; return (pos >= 0 && pos < mnp) ? &mpos[pos] : 0; }
 static float marf(const char *k, int pos, float d, float lo, float hi) { const MV *v = marg(k, pos); float x = (v && !v->s) ? v->f[0] : d; return x < lo ? lo : (x > hi ? hi : x); }
 static void mcopy(char *d, int mx, const MV *v, const char *def) {
@@ -2130,7 +2161,7 @@ static void mq_stmt(void) {
       const char *sv = mq; int sl = mqLine, isk = 0; char kn[24];
       if (mq_alpha(mq_pk())) { mq_id(kn, 24); mq_ws(); if (mq_pk() == '=' && !(mq + 1 < mqe && mq[1] == '=')) { mq++; isk = 1; } else { mq = sv; mqLine = sl; } }
       MV v; if (!mq_expr(&v)) { mq_skip(); return; }
-      if (isk) { if (mnk >= 24) { mq_err("trop d'arguments"); mq_skip(); return; } int j = 0; for (; kn[j]; j++) mkw[mnk].k[j] = kn[j]; mkw[mnk].k[j] = 0; mkw[mnk].v = v; mnk++; }
+      if (isk) { if (mnk >= 24) { mq_err("trop d'arguments"); mq_skip(); return; } const char *kc = mq_alias(kn); int j = 0; for (; kc[j] && j < 23; j++) mkw[mnk].k[j] = kc[j]; mkw[mnk].k[j] = 0; mkw[mnk].v = v; mnk++; }
       else { if (mnp >= 8) { mq_err("trop d'arguments"); mq_skip(); return; } mpos[mnp++] = v; }
       mq_ws();
       if (mq_pk() == ',') { mq++; continue; }
@@ -2221,7 +2252,7 @@ static void item_text(int id, char *s) {
     case O_VIEW: p = cat(p, "Distance de vue: "); cat(p, VN[vdI]); break;
     case O_SKID: p = cat(p, "Traces de pneus: "); cat(p, optSkid ? "Oui" : "Non"); break;
     case O_PART: p = cat(p, "Particules et fumee: "); cat(p, optPart ? "Oui" : "Non"); break;
-    case O_OBJ: p = cat(p, "Objets (barils...): "); cat(p, optObj ? "Oui" : "Non"); break;
+    case O_OBJ: p = cat(p, "Objets route (cones...): "); cat(p, optObj ? "Oui" : "Non (retires)"); break;
     case O_RAMP: p = cat(p, "Rampes/boucles/ralentis: "); cat(p, optRamp ? "Oui" : "Non"); break;
     case O_PUNCT: p = cat(p, "Crevaisons: "); cat(p, optPunct ? "Oui" : "Non"); break;
     case O_KEYS: cat(p, "Test des touches  >"); break;
@@ -2231,6 +2262,7 @@ static void item_text(int id, char *s) {
     case O_DEV: cat(p, devOn ? "Mode developpeur: oui" : "Mode developpeur: non"); break;
     case O_CRASHV: p = cat(p, "Vitesse crash-test: "); p = num(p, CRASHV[crashI]); cat(p, " km/h"); break;
     case O_FAVRESET: cat(p, "Favoris: remettre par defaut (OK)"); break;
+    case O_UNLOCK: cat(p, devUnlock ? "Debridage securite: OUI (libre)" : "Debridage securite: non"); break;
     case O_DEVRESET: cat(p, "Variables dev: tout reinitialiser (OK)"); break;
     case O_TUTO: cat(p, "Tutoriel  >"); break;
     case O_DELIV: cat(p, "Livraisons  >"); break;
@@ -2251,7 +2283,7 @@ static void draw_page(const uint16_t *it, int cnt, int sel) {
     if (id < 100 || id >= 128) { if (is_fav(id)) p = cat(p, "* "); }
     item_text(id, p);
     row(s, 30, 18 + line * 18, 260, 17, i == sel); }
-  txt(pgMsgT > 0 ? pgMsg : (pgCur == P_DEV ? "Gauche/Droite: valeur (tenir)  OK: defaut" : "OK/Gauche/Droite: changer  Shift: favori"), 30, 224, 0, pgMsgT > 0 ? C(255, 150, 90) : C(150, 160, 190), BGC);
+  txt(pgMsgT > 0 ? pgMsg : (pgCur == P_DEV ? (devUnlock ? "G/D: valeur  OK: saisir un nombre" : "Gauche/Droite: valeur (tenir)  OK: defaut") : "OK/Gauche/Droite: changer  Shift: favori"), 30, 224, 0, pgMsgT > 0 ? C(255, 150, 90) : C(150, 160, 190), BGC);
 }
 // ---- config persistante: favoris, mode Simple/Avance, mode developpeur et ses valeurs (fichier separe des records)
 #define CFG_FILE "numbeam.cfg"
@@ -2260,7 +2292,7 @@ static void draw_page(const uint16_t *it, int cnt, int sel) {
 static void cfg_save(void) {
   uint32_t w[CFG_N]; for (int i = 0; i < CFG_N; i++) w[i] = 0;
   w[0] = CFG_MAGIC; for (int i = 0; i < NFAV; i++) w[1 + i / 4] |= (uint32_t)fav[i] << (8 * (i % 4));
-  w[3] = (uint32_t)(advMode | (devOn << 1)); w[4] = devSet;
+  w[3] = (uint32_t)(advMode | (devOn << 1) | (devUnlock << 2)); w[4] = devSet;
   for (int i = 0; i < NDEV; i++) { union { float f; uint32_t u; } c; c.f = devOv[i]; w[5 + i] = c.u; }
   w[CFG_N - 1] = rec_sum(w, CFG_N - 1);
   ef_write(CFG_FILE, w, sizeof(w));
@@ -2271,8 +2303,8 @@ static void cfg_load(void) {
   for (uint32_t i = 0; i < n; i++) ((uint8_t *)w)[i] = src[i];                  // le fichier n'est pas aligne: copie octet par octet
   if (w[0] != CFG_MAGIC || w[CFG_N - 1] != rec_sum(w, CFG_N - 1)) return;
   for (int i = 0; i < NFAV; i++) { int id = (int)((w[1 + i / 4] >> (8 * (i % 4))) & 255u); fav[i] = (uint8_t)((id < QUICK_COUNT || (id >= 40 && id <= O_ACH) || (id >= 128 && id < 128 + NDEV) || (id >= MOD_POW0 && id < MOD_MODE0 + MOD_MAXM)) ? id : 255); }
-  advMode = (int)(w[3] & 1u); devOn = (int)((w[3] >> 1) & 1u); devSet = (uint16_t)(w[4] & ((1u << NDEV) - 1u));
-  for (int i = 0; i < NDEV; i++) { union { float f; uint32_t u; } c; c.u = w[5 + i]; devOv[i] = c.f; if (!(devOv[i] >= DEVM[i].lo && devOv[i] <= DEVM[i].hi)) devSet &= (uint16_t)~(1u << i); }
+  advMode = (int)(w[3] & 1u); devOn = (int)((w[3] >> 1) & 1u); devUnlock = (int)((w[3] >> 2) & 1u); devSet = (uint16_t)(w[4] & ((1u << NDEV) - 1u));
+  for (int i = 0; i < NDEV; i++) { union { float f; uint32_t u; } c; c.u = w[5 + i]; devOv[i] = c.f; if (!(devOv[i] >= dev_lo(i) && devOv[i] <= dev_hi(i))) devSet &= (uint16_t)~(1u << i); }
 }
 static void draw_tutorial(void) {
   char text[72]; tut_text(text); eadk_display_push_rect_uniform((eadk_rect_t){0, 224, 320, 16}, C(10, 10, 14));
@@ -2491,8 +2523,8 @@ int main(void) {
       else { camx = cx - camhx * dist; camz = cz - camhz * dist;
         float gy = gh(camx, camz) + 1.4f, ty = cy + 2.6f + hO; if (ty < gy) ty = gy; camy += (ty - camy) * .15f; }
       hor = (int)(lh * (camInterior ? .42f : .72f) - (camy - cy) * foc / dist);
-      scene(0); draw_overlay(sp * 3.6f, vf < -.5f ? -1 : gearNow); if (delOn) draw_deliv_hud(); if (mapId == 3 && optMap) { draw_minimap(0); draw_minimap(1); } ach_banner_bg(); present(0); ach_banner_txt();   // the map is drawn last: in full screen it hides the gauges and the rest
-      if (++fr % 6 == 0) { if (mapId == 3 && optMap == 2) eadk_display_push_rect_uniform((eadk_rect_t){0, 224, 320, 16}, C(10, 10, 14)); else if (delOn) deliv_bar((int)(sp * 3.6f)); else hud((int)(sp * 3.6f), vf < -.5f ? -1 : gearNow, lap, (int)(now - lapT), recLap); }
+      scene(0); draw_overlay(sp * 3.6f, vf < -.5f ? -1 : gearNow); if (delOn) draw_deliv_hud(); if (mapId == 3 && optMap) { draw_minimap(0); draw_minimap(1); } else if (mapId == 5 && optMap) draw_minimap_it(); ach_banner_bg(); present(0); ach_banner_txt();   // the map is drawn last: in full screen it hides the gauges and the rest
+      if (++fr % 6 == 0) { if ((mapId == 3 || mapId == 5) && optMap == 2) eadk_display_push_rect_uniform((eadk_rect_t){0, 224, 320, 16}, C(10, 10, 14)); else if (delOn) deliv_bar((int)(sp * 3.6f)); else hud((int)(sp * 3.6f), vf < -.5f ? -1 : gearNow, lap, (int)(now - lapT), recLap); }
       if (tutOn) draw_tutorial();
     } else if (st == S_DMG) {
       if (redraw) { draw_dmg(); redraw = 0; }
@@ -2522,7 +2554,7 @@ int main(void) {
         if (id >= MOD_POW0) {                                                     // mods: pouvoir (en jeu) ou mode (lance la partie)
           if (id < MOD_MODE0) { if (O) { power_use(id - MOD_POW0); closeP = 1; } }
           else if (O) { mode_apply(id - MOD_MODE0); tutOn = 0; delOn = 0; startpos(); st = S_GAME; lap = 1; best = 0; cp = 0; lapT = eadk_timing_millis(); last = lapT; acc = 0; eadk_display_push_rect_uniform(eadk_screen_rect, 0); } }
-        else if (id >= 128) { if (O) { if (devOn) { dev_reset(id - 128); cfg_save(); } else { pgMsg = "Active le mode developpeur"; pgMsgT = 40; } } else { dev_edit(id - 128, d, mul); cfg_save(); } }
+        else if (id >= 128) { if (O) { if (devOn && devUnlock) { numI = id - 128; numLen = 0; numBuf[0] = 0; pgSelSave = sel; st = S_NUM; redraw = 1; } else if (devOn) { dev_reset(id - 128); cfg_save(); } else { pgMsg = "Active le mode developpeur"; pgMsgT = 40; } } else { dev_edit(id - 128, d, mul); cfg_save(); } }
         else if (id >= 100) { if (O || R) { if (pgDepth < 5) { pgStk[pgDepth] = (uint8_t)pgCur; pgSelStk[pgDepth] = (uint8_t)sel; pgDepth++; } pgCur = id - 100; sel = 0; } }
         else if (id < QUICK_COUNT) { lastQid = id; lastQd = d; int r = quick_apply(id, d, O);
           if (r & 2) { lap = 1; best = 0; cp = 0; lapT = eadk_timing_millis(); }
@@ -2535,7 +2567,7 @@ int main(void) {
           case O_VIEW: vdI = (vdI + 3 + d) % 3; setq(); break;
           case O_SKID: optSkid ^= 1; skid_clear(); break;
           case O_PART: optPart ^= 1; part_clear(); break;
-          case O_OBJ: optObj ^= 1; if (!optObj) objects_clear(); break;                   // objets remis au prochain depart
+          case O_OBJ: optObj ^= 1; if (!optObj) objects_clear(); else { pgMsg = "Objets remis au prochain depart"; pgMsgT = 40; } break;                   // objets remis au prochain depart
           case O_RAMP: optRamp ^= 1; break;
           case O_PUNCT: optPunct ^= 1; break;
           case O_SOLID: solid = (solid + 3 + d) % 3; if (!pgInGame) menu_init(); break;
@@ -2543,6 +2575,7 @@ int main(void) {
           case O_MODE: advMode ^= 1; cfg_save(); break;
           case O_DEV: devOn ^= 1; if (devOn) dev_apply(); else dev_reset_all(); cfg_save(); break;
           case O_FAVRESET: if (O) { fav_default(); cfg_save(); pgMsg = "Favoris remis par defaut"; pgMsgT = 40; } break;
+          case O_UNLOCK: if (!devOn) { pgMsg = "Active le mode developpeur"; pgMsgT = 40; } else { devUnlock ^= 1; if (!devUnlock) dev_unlock_off(); else { pgMsg = "Limites retirees: tout peut casser"; pgMsgT = 60; } cfg_save(); } break;
           case O_DEVRESET: if (O) { dev_reset_all(); cfg_save(); pgMsg = "Variables reinitialisees"; pgMsgT = 40; } break;
           case O_KEYS: if (O) { pgSelSave = sel; st = S_KEYS; redraw = 1; } break;
           case O_CTRL: if (O) { pgSelSave = sel; cap = 0; sel = 0; st = S_CTRL; redraw = 1; } break;
@@ -2554,7 +2587,7 @@ int main(void) {
           case O_TUTO: if (O) { fav_ensure(0); fav_ensure(1); cfg_save(); mapBak = mapId; mapId = 3; tutOn = 1; tutStep = tutFlag = tutOk = evDmg = evRepair = 0; yawO = hO = dO = 0; tHood = tDoor = tTrunk = oHood = oDoor = oTrunk = 0; startpos(); st = S_GAME; lap = 1; best = 0; cp = 0; lapT = eadk_timing_millis(); last = lapT; acc = 0; eadk_display_push_rect_uniform(eadk_screen_rect, 0); } break;
           default: break; }
       }
-      if (st == S_PAGE && pressed(k, eadk_key_shift) && id >= 0 && id != O_MODINFO && id != O_MODRELOAD && (id < 100 || id >= 128)) {      // Shift: ajouter / retirer des favoris
+      if (st == S_PAGE && pressed(k, eadk_key_shift) && id >= 0 && id != O_MODINFO && id != O_MODRELOAD && id != O_UNLOCK && (id < 100 || id >= 128)) {      // Shift: ajouter / retirer des favoris
         int r = fav_toggle(id); cfg_save(); redraw = 1;
         pgMsg = r < 0 ? "Favoris pleins (8 max)" : (r ? "Ajoute aux favoris" : "Retire des favoris"); pgMsgT = 40; }
       if (st == S_PAGE && !closeP) {
@@ -2590,6 +2623,24 @@ int main(void) {
       if (redraw) { draw_ach(sel); redraw = 0; }
       if (U) { sel = (sel + NACH - 1) % NACH; redraw = 1; } if (D) { sel = (sel + 1) % NACH; redraw = 1; }
       if (B) { clear(); st = S_PAGE; sel = pgSelSave; redraw = 1; }
+      eadk_timing_msleep(30);
+    } else if (st == S_NUM) {                             // saisie directe d'une variable dev (debridage)
+      static const struct { int key; char ch; } NK[12] = {{eadk_key_zero, '0'}, {eadk_key_one, '1'}, {eadk_key_two, '2'}, {eadk_key_three, '3'}, {eadk_key_four, '4'}, {eadk_key_five, '5'}, {eadk_key_six, '6'}, {eadk_key_seven, '7'}, {eadk_key_eight, '8'}, {eadk_key_nine, '9'}, {eadk_key_dot, '.'}, {eadk_key_minus, '-'}};
+      for (int q = 0; q < 12; q++) if (pressed(k, NK[q].key) && numLen < 10) {
+        char c = NK[q].ch; int hasDot = 0; for (int j = 0; j < numLen; j++) if (numBuf[j] == '.') hasDot = 1;
+        if ((c == '-' && numLen > 0) || (c == '.' && hasDot)) continue;
+        numBuf[numLen++] = c; numBuf[numLen] = 0; redraw = 1; }
+      if (pressed(k, eadk_key_backspace)) { if (numLen > 0) { numBuf[--numLen] = 0; redraw = 1; } else { dev_reset(numI); cfg_save(); clear(); st = S_PAGE; sel = pgSelSave; redraw = 1; } }   // champ vide + Effacer = valeur par defaut
+      if (redraw && st == S_NUM) { clear(); char s2[48], *p2 = s2; txt(DEVM[numI].nm, 30, 8, 1, ACC, BGC);
+        p2 = cat(p2, "Actuel: "); p2 = fmtf(p2, *DEVP[numI] * DEVM[numI].sc, DEVM[numI].dec); cat(p2, DEVM[numI].un); txt(s2, 30, 44, 0, 0xFFFF, BGC);
+        p2 = s2; p2 = cat(p2, "Nouvelle valeur: "); p2 = cat(p2, numBuf); cat(p2, "_"); txt(s2, 30, 70, 0, C(255, 210, 80), BGC);
+        txt("0-9 . - : saisir   Effacer: corriger", 30, 120, 0, C(150, 160, 190), BGC); txt("OK: valider   Retour: annuler", 30, 138, 0, C(150, 160, 190), BGC);
+        txt("Champ vide + Effacer: valeur par defaut", 30, 156, 0, C(150, 160, 190), BGC); txt("Aucune limite de securite !", 30, 190, 0, C(255, 110, 90), BGC); redraw = 0; }
+      if (O && st == S_NUM) { if (numLen > 0) { float v = 0.f, f = 1.f; int neg = 0, dot = 0, nd = 0;
+          for (int j = 0; j < numLen; j++) { char c = numBuf[j]; if (c == '-') neg = 1; else if (c == '.') dot = 1; else { nd++; if (dot) { f *= .1f; v += (c - '0') * f; } else v = v * 10.f + (c - '0'); } }
+          if (nd) { if (neg) v = -v; dev_set(numI, v / DEVM[numI].sc); cfg_save(); } }
+        clear(); st = S_PAGE; sel = pgSelSave; redraw = 1; }
+      else if (B && st == S_NUM) { clear(); st = S_PAGE; sel = pgSelSave; redraw = 1; }
       eadk_timing_msleep(30);
     } else if (st == S_STATS) {
       if (redraw) { draw_stats(); redraw = 0; }

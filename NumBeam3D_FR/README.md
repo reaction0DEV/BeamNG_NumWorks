@@ -3,7 +3,7 @@
 Simulateur de conduite et de crash en 3D avec **physique à déformation par poutres** (style BeamNG), écrit en C pour la calculatrice **NumWorks** (application externe `.nwa`).
 Tout tourne en temps réel sur la calculatrice : rendu 3D logiciel, physique de carrosserie déformable, trafic, météo, défis et sauvegarde des records.
 
-> Le jeu est entièrement en français et en ASCII (la police de la calculatrice ne gère pas les accents).
+> Voici la **version française** : le texte du jeu est en français et en ASCII (la police de la calculatrice ne gère pas les accents). La version anglaise est dans le dossier `NumBeam3D_EN`.
 
 ## Points forts
 
@@ -12,10 +12,12 @@ Tout tourne en temps réel sur la calculatrice : rendu 3D logiciel, physique de 
 - **6 cartes** : Circuit, Route, Crash-test, Ville, Vide (rampes et loopings) et **Italie** (route de campagne sans fin, villages, collines toscanes).
 - **16 véhicules**, 4 moteurs, 4 types de roues, 4 suspensions, 3 châssis, 4 remorques.
 - **Défis** : livraisons chronométrées, crash-tests, tutoriel, 29 succès, statistiques à vie.
-- **Mods en Python** : ajoute tes véhicules, cartes, pouvoirs et modes de jeu avec de simples scripts, sans recompiler (voir [`MANUEL_MODS.md`](MANUEL_MODS.md)).
-- **Mode développeur** : 10 variables physiques réglables (gravité, adhérence, vitesse max, turbo…).
+- **Mods en Python** : ajoute tes véhicules, cartes, pouvoirs et modes de jeu avec de simples scripts, sans recompiler (voir [`MANUEL_MODS.md`](modding/MANUEL_MODS.md)).
+- **Mode développeur** : 10 variables physiques réglables (gravité, adhérence, vitesse max, turbo…), avec un **débridage de sécurité** optionnel pour saisir n'importe quelle valeur.
+- **Mini-carte** : en Ville et maintenant aussi en Italie (carte défilante centrée sur la voiture).
+- **Option « Objets sur la route »** : cônes, caisses, barils et mur de pneus peuvent être retirés (Options → Monde, ou menu rapide).
 
-La liste complète de ce que contient le programme est dans [`CONTENU.md`](CONTENU.md).
+La liste complète de ce que contient le programme est dans [`CONTENU.md`](info/CONTENU.md).
 
 ## Contenu du dépôt
 
@@ -27,10 +29,10 @@ La liste complète de ce que contient le programme est dans [`CONTENU.md`](CONTE
 | `src/epsilon_files.h` | Lecture/écriture de fichiers dans le système de fichiers d'Epsilon (sauvegardes) |
 | `icon.png` | Icône de l'application |
 | `Makefile` | Compilation et installation |
-| `COMPILER.md` | Guide pas à pas pour compiler et installer |
-| `MANUEL_MODS.md` | Manuel complet des mods Python |
-| `exemple_mods.py` | Exemple de script de mods |
-| `CONTENU.md` | Inventaire de tout ce que contient le jeu |
+| `info/COMPILER.md` | Guide pas à pas pour compiler et installer |
+| `modding/MANUEL_MODS.md` | Manuel complet des mods Python |
+| `modding/exemple_mods.py` | Exemple de script de mods |
+| `info/CONTENU.md` | Inventaire de tout ce que contient le jeu |
 
 ## Compilation
 
@@ -43,7 +45,7 @@ make run      # installe sur la calculatrice branchée en USB
 make clean    # supprime output/
 ```
 
-Guide détaillé (Windows, macOS, Linux, dépannage) : [`COMPILER.md`](COMPILER.md).
+Guide détaillé (Windows, macOS, Linux, dépannage) : [`COMPILER.md`](info/COMPILER.md).
 
 Le Makefile attend les sources dans `src/` (`main.c`, `sim.h`, `epsilon_app.h`, `epsilon_files.h`) et `icon.png` à la racine, à côté du `Makefile`.
 
@@ -86,7 +88,7 @@ Toutes les touches sont reconfigurables (Options → Conduite → Commandes).
 
 ## Mods Python
 
-Écris un script dans l'application **Python** de la calculatrice, commence-le par `# numbeam`, et le jeu le lit au démarrage :
+Écris un script dans l'application **Python** de la calculatrice, commence-le par `# numbeam`, et le jeu le lit au démarrage (les options peuvent aussi s'écrire en anglais : `name`, `color`, `gravity`…) :
 
 ```python
 # numbeam
@@ -97,7 +99,7 @@ pouvoir("Lune", gravite=3, duree=15)
 mode("Course lunaire", carte="Arene", vehicule="Fusee", gravite=6)
 ```
 
-Limites : 8 véhicules, 4 cartes, 8 pouvoirs, 8 modes. Détails dans [`MANUEL_MODS.md`](MANUEL_MODS.md).
+Limites : 8 véhicules, 4 cartes, 8 pouvoirs, 8 modes. Détails dans [`MANUEL_MODS.md`](modding/MANUEL_MODS.md).
 
 ## Notes techniques
 
