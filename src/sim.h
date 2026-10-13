@@ -7,7 +7,7 @@
 #define NG 10
 #define MAX_AI 64
 static float G = 14.f, gripF = 1.f; static int turbo;
-static int optSkid = 1, optPart = 1, optObj = 1, optRamp = 1, optPunct = 1, optEvents = 1;   // settings: tyre marks, particles, objects, ramps/loops, punctures
+static int optSkid = 1, optPart = 1, optObj = 1, optRamp = 1, optPunct = 1, optEvents = 1, optBody = 1;   // settings: tyre marks, particles, objects, ramps/loops, punctures
 static int manualGear, clutchAssist = 1; static float engBrake = 1.f, clutchKey, hbrake, freeRpm = 900.f, shiftT, stallT;   // clutchAssist: 1 = shifts cut power briefly, no grinding / stalling   // manualGear: 0 = auto, 1 = manual gearbox (player only)
 typedef struct { float x, y, z, vx, vy, vz, im, r, rc; uint8_t gnd, t; } Node;   // t: 0 body, 1 car wheel, 2 trailer wheel
 typedef struct { uint8_t a, b, f, t0, o, g; float l0, lr, k, c, yl, bk; } Beam;  // f: 0 body 1 susp 2 broken 3 hitch 4 panel attach; o: 0 car 1 trailer 2 object
@@ -15,9 +15,11 @@ static Node nPl[NMAX]; static Beam bmPl[MB]; static Node *n = nPl; static Beam *
 static int nbCap = MB;
 static int nn, nb, nbody, nbc, ntr = -1, nob0, nobj, pAtt[NG], pAtt0[NG], wAtt[4], trl, solid = 1, mapId;
 static int ntrN, ncg, nbCar;   // trailer: node count, crate count (flatbed), number of car-only beams (before the trailer's)
-typedef struct { float x, z, phase, speed, hx, hz; uint8_t bot; } TrafficCar;   // bot: 0 = kinematic rail car, else physics-bot slot + 1
+typedef struct { float x, z, phase, speed, hx, hz; uint8_t bot; float cur, honkT; int8_t blink; uint8_t brake; } TrafficCar;   // cur: current speed, honkT: horn timer, blink: -1 left / 0 / +1 right, brake: brake lights on   // bot: 0 = kinematic rail car, else physics-bot slot + 1
 static TrafficCar traffic[MAX_AI]; static int trafficEnabled = 1, trafficCount = 6, trafficBehavior, trafficSpeed = 2;
-static TrafficCar policeCar; static int pursuitEnabled, cityPlan, weatherMode;
+static TrafficCar policeCar; static int pursuitEnabled, cityPlan, weatherMode; static float honkMsgT; static int fuelX = 1;   // fuelX: fuel consumption multiplier (quick menu)   // honkMsgT: "KLAXON" message timer (HUD)
+static float devTV = 1.5f, devTA = 2.2f, devEB = .018f;   // mode dev: multiplicateurs turbo (vitesse / acceleration), coefficient de frein moteur
+static void dev_apply(void);                              // defini dans main.c: impose les valeurs du mode developpeur au vehicule du joueur
 static float tunePower = 1.f, tuneGrip = 1.f, tuneSusp = 1.f, tuneBrake = 1.f, signalClock;
 static const uint8_t PB[NG] = {22, 26, 30, 34, 38, 42, 46, 50, 54, 57}, PN[NG] = {4, 4, 4, 4, 4, 4, 4, 4, 3, 3};   // hood, front bumper, rear bumper, trunk lid, doors L/R, windshield, engine, seats L/R
 static const char *PNAME[NG] = {"Capot", "Pare-ch.AV", "Pare-ch.AR", "Coffre", "Porte G", "Porte D", "Pare-brise", "Moteur", "Siege G", "Siege D"};
@@ -27,13 +29,13 @@ static float gbumpF;   // 1 when the ground point just sampled by gh() is on a s
 // ---- vehicle systems: radiator (front), fuel tank (rear), driveshaft (underbody). Pierced tank => leak, fire or explosion.
 static float fuel = 1.f, coolant = 1.f, engTemp = .3f, radHp = 1.f, tankHp = 1.f, shaftHp = 1.f, driveEff = 1.f;
 static float fireI, fireT, boomAt = 1e9f, boomT = 99.f, flashT, jolt, vcmx, vcmz, steamI, fxClock;
-static int burning, exploded, fxPrimed; static unsigned fxSeed = 777u;
+static int burning, exploded, fxPrimed, bodyEpoch; static unsigned fxSeed = 777u;
 static int abFront, abSideL, abSideR, abBang, beltOn = 1, airbagsOn = 1; static float abT = 99.f, occRisk;   // airbags / seat belt / occupant injury risk (player car only)
 static float fx_rand(void) { fxSeed = fxSeed * 1664525u + 1013904223u; return (fxSeed >> 8) / 16777215.f; }
 static void fx_reset(void) {
   fuel = 1.f; coolant = 1.f; engTemp = .3f; radHp = tankHp = shaftHp = driveEff = 1.f; fireI = fireT = 0.f; boomAt = 1e9f; boomT = 99.f;
   flashT = 0.f; jolt = vcmx = vcmz = steamI = 0.f; burning = exploded = fxPrimed = 0;
-  if (n == nPl) { abFront = abSideL = abSideR = abBang = 0; abT = 99.f; occRisk = 0.f; shiftT = stallT = 0.f; }
+  if (n == nPl) { bodyEpoch++; abFront = abSideL = abSideR = abBang = 0; abT = 99.f; occRisk = 0.f; shiftT = stallT = 0.f; }
 }
 static const float SOLF[3] = {1.6f, 1.f, .65f};
 // ---- punctures: a hard landing can burst a tyre; it then deflates, the wheel sinks, grip and drive drop, rolling drag rises
@@ -47,7 +49,9 @@ static void tires_update(float dt) {                 // once per frame, player c
   }
 }
 typedef struct { const char *nm; float sx, sy, sz, im, pw, gr; uint8_t r, g, b; float th; } Veh;
-#define NV 16   // 0-3 de base, 4 = généré, 5+ = modèles ajoutés (VEH[NV] reste réservé au bot actif)
+#define NVB 16   // 0-3 de base, 4 = généré, 5-15 = modèles ajoutés
+#define NV 24    // + 8 emplacements pour les véhicules des mods (VEH[NV] reste réservé au bot actif)
+static int nVeh = NVB;   // véhicules disponibles = NVB + véhicules chargés depuis les scripts
 static char genName[16] = "Gen #1";
 static Veh VEH[NV + 1] = {{"Berline",1,1,1,1,1,1,200,35,30},{"Sport",1.05f,.8f,1.12f,1.1f,1.15f,1.12f,40,90,210},
   {"Pick-up",1.12f,1.25f,1.15f,.8f,.95f,.85f,230,170,30},{"Buggy",.8f,.85f,.7f,1.3f,1.1f,1.15f,60,180,70},{genName,1,1,1,1,1,1,150,150,150},
@@ -127,26 +131,30 @@ static float bump(float x, float c, float wl, float wr, float h) {
 }
 // ---- empty map (4): ramps, jumps and vertical loops
 typedef struct { float cx, hw, z0, z1, h0, h1; } Rmp;      // slope along z between z0 and z1 (height h0 -> h1), width +-hw around x = cx
-static const Rmp RMP[] = {
+static const Rmp RMPD[] = {
   {0, 3.5f, 34, 48, 0, 2.2f}, {0, 3.5f, 66, 82, 2.f, 0},                                  // jump 1: kicker + landing ramp
   {-22, 4.f, 30, 50, 0, 4.5f}, {-22, 4.f, 80, 104, 4.f, 0},                               // jump 2: big kicker + landing
   {22, 4.5f, 30, 46, 0, 3.f}, {22, 4.5f, 46, 60, 3.f, 3.f}, {22, 4.5f, 60, 76, 3.f, 0},   // platform
   {44, 4.f, 36, 46, 0, 1.2f}, {44, 4.f, 46, 56, 1.2f, 0}, {44, 4.f, 62, 72, 0, 1.2f}, {44, 4.f, 72, 82, 1.2f, 0}, {44, 4.f, 88, 98, 0, 1.2f}, {44, 4.f, 98, 108, 1.2f, 0},   // humps
   {8, 4.f, 165, 185, 0, 5.f}, {8, 4.f, 215, 240, 4.5f, 0},                                // mega jump after loop A
   {-60, 5.f, 20, 50, 0, 7.f}, {-60, 5.f, 95, 130, 6.f, 0}};                               // huge jump
-#define NRMP ((int)(sizeof(RMP) / sizeof(RMP[0])))
+#define NRMPD ((int)(sizeof(RMPD) / sizeof(RMPD[0])))
+static const Rmp *rmpT = RMPD; static int nrmpT = NRMPD;   // tables actives (une carte perso les remplace)
 static float vm_height(float x, float z) {
   float h = 0; if (!optRamp) return 0.f;
-  for (int i = 0; i < NRMP; i++) {
-    const Rmp *R = &RMP[i]; if (z < R->z0 || z > R->z1) continue;
+  for (int i = 0; i < nrmpT; i++) {
+    const Rmp *R = &rmpT[i]; if (z < R->z0 || z > R->z1) continue;
     float dx = x - R->cx; if (dx < 0) dx = -dx; float w = (R->hw - dx) / .8f; if (w <= 0) continue; if (w > 1) w = 1;
     float t = (z - R->z0) / (R->z1 - R->z0), hh = (R->h0 + (R->h1 - R->h0) * t) * w; if (hh > h) h = hh;
   }
   return h;
 }
 // vertical loops: a helix (ring in the y-z plane whose lane drifts sideways by LOOP_L over one turn: entry at x = lx - L/2, exit at x = lx + L/2)
-#define NLOOP 2
-static const float LOOPS[NLOOP][3] = {{4.f, 125.f, 6.5f}, {-42.f, 110.f, 6.5f}};   // lx, lz, radius
+#define NLOOPMAX 4
+static const float LOOPD[2][3] = {{4.f, 125.f, 6.5f}, {-42.f, 110.f, 6.5f}};   // lx, lz, radius (boucles d'origine)
+static float LOOPS[NLOOPMAX][3] = {{4.f, 125.f, 6.5f}, {-42.f, 110.f, 6.5f}}; static int nloopT = 2;   // boucles actives
+// carte perso (mods): cmap = indice (-1: aucune), la carte utilise le moteur de la carte Vide (mapId 4)
+static int cmap = -1; static float cmHillA, cmHillL = 30.f, cmSx, cmSz; static uint8_t cmCol, cmR, cmG, cmB, cmNobj, cmOk[12]; static float cmOx[12], cmOz[12];
 #define LOOP_L 8.f
 #define LOOP_HW 3.4f
 static float fatan2(float y, float x) {
@@ -164,13 +172,16 @@ static float fatan2(float y, float x) {
 #define CITY_NZ 8
 // 8 x 8 blocks, varied: 0 office, 1 tower (downtown), 2 low-rise, 3 park (no building)
 static unsigned city_hash(int ix, int iz) { unsigned v = (unsigned)(ix + 50) * 73856093u ^ (unsigned)(iz + 50) * 19349663u; v ^= v >> 13; v *= 0x5bd1e995u; v ^= v >> 15; return v; }
+// gas stations: a few blocks are replaced by a station (kind 4, no building: cars drive in under the canopy)
+static int city_is_station(int ix, int iz) { return (ix == -1 && iz == 0) || (ix == 1 && iz == -2) || (ix == -3 && iz == 2) || (ix == 2 && iz == 3); }
 static int city_kind(int ix, int iz) {
+  if (city_is_station(ix, iz)) return 4;
   unsigned v = city_hash(ix, iz); int k = (int)(v % 10), central = ix >= -2 && ix <= 1 && iz >= -2 && iz <= 1;
   if (k == 0) return 3; if (k <= 2) return 2; if (central && k <= 6) return 1; return 0;
 }
 static float city_height(int ix, int iz) {
   unsigned v = city_hash(ix, iz) >> 8; int k = city_kind(ix, iz);
-  if (k == 3) return 0.f; if (k == 2) return 5.f + (v & 3) * 1.5f; if (k == 1) return 30.f + (v % 5) * 6.f; return 12.f + (v & 3) * 4.f;
+  if (k == 3 || k == 4) return 0.f; if (k == 2) return 5.f + (v & 3) * 1.5f; if (k == 1) return 30.f + (v % 5) * 6.f; return 12.f + (v & 3) * 4.f;
 }
 static int city_round(float v) { return (int)(v + (v >= 0 ? .5f : -.5f)); }
 static void city_center(int ix, int iz, float *x, float *z) {
@@ -206,11 +217,23 @@ static float city_bumps(float x, float z) {
   else if (az > 14.2f && ax < 1.6f && cityPlan != 1 && ((city_hash(rx + 17, rz + (dz > 0 ? 1 : 0)) >> 5) & 1)) h = bump(ax, 0.f, 1.5f, 1.5f, .17f);   // road running along x
   return h;
 }
+// ---- Italy (map 5): endless winding country road along z, rolling Tuscan hills, villages every 360 m
+static float it_xc(float z) { float k = z * z / (z * z + 3600.f); return k * (28.f * fsin(z * .011f) + 12.f * fsin(z * .027f)); }   // road centre line (straight at the start)
+static float it_gh(float x, float z) {
+  float dx = x - it_xc(z), ad = (dx < 0 ? -dx : dx) * .9f;
+  float rh = 2.5f * fsin(z * .014f) + 1.2f * fsin(z * .037f);                            // the road itself rolls gently
+  float s = (ad - 9.f) / 40.f; s = s < 0 ? 0 : (s > 1 ? 1 : s); s = s * s * (3.f - 2.f * s);   // smooth: flat road edge
+  float H = 9.f * fsin(x * .021f + z * .013f) + 6.f * fsin(z * .019f - x * .011f) + 3.f * fsin(x * .05f + z * .04f);
+  float mt = (ad - 160.f) / 220.f; mt = mt < 0 ? 0 : (mt > 1 ? 1 : mt);                 // far mountains
+  gdist = ad; gfeat = 0.f; gbumpF = 0.f;
+  return rh + s * (.7f * H + 11.f) + mt * mt * 70.f;
+}
 static float gh(float x, float z) {
   float h, ft = 0, bb = 0, ax = x < 0 ? -x : x;
   gbumpF = 0.f;
+  if (mapId == 5) return it_gh(x, z);
   if (mapId == 3) { gdist = ax; gfeat = 0; bb = city_bumps(x, z); gbumpF = bb > .01f; return bb; }
-  if (mapId == 4) { float hh = vm_height(x, z); gdist = ax; gfeat = hh > .02f ? 1.f : 0.f; return hh; }   // 4 = empty map: flat + ramps
+  if (mapId == 4) { float hh = vm_height(x, z); gdist = ax; gfeat = hh > .02f ? 1.f : 0.f; if (cmHillA > 0.f) hh += cmHillA * .5f * (fsin(x / cmHillL) + fsin(z / (cmHillL * .8f))); return hh; }   // 4 = empty map: flat + ramps (+ collines d'une carte perso)
   if (mapId == 0) {
     float rho = fsqrt(x * x / (TA * TA) + z * z / (TB * TB)), g2 = fsqrt(x * x / (TA * TA * TA * TA) + z * z / (TB * TB * TB * TB)) + 1e-6f;
     float d = rho < .15f ? -60.f : (rho - 1.f) * rho / g2, ad = d < 0 ? -d : d;
@@ -230,6 +253,138 @@ static float gh(float x, float z) {
   }
   gfeat = ft; return h + ft + bb;
 }
+// ---- Italy decor: generated per 30 m cell along the road (deterministic, cached). Boxes are axis aligned; solid ones collide with the car.
+#define IT_CL 30.f
+#define ITN 12
+typedef struct { float x, z, hx, hz, y0, y1; uint8_t r, g, b, solid; } ItBox;
+typedef struct { int cz, n; ItBox b[ITN]; } ItCell;
+static ItCell itc[16];
+static const uint8_t ITW[4][3] = {{205, 170, 110}, {226, 206, 160}, {192, 126, 86}, {212, 152, 132}};   // ochre, cream, terracotta, pink walls
+static int it_cz(float z) { return (int)(z / IT_CL + 100000.f) - 100000; }
+static float it_rnd(int cz, int k) { return (city_hash(cz * 31 + k, k * 7 + 5) & 1023) / 1023.f; }
+static float it_lat(float z, float hx, float hz) { float sl = (it_xc(z + 4.f) - it_xc(z - 4.f)) * .125f; if (sl < 0) sl = -sl; return 9.6f + hx + sl * (hz + 1.f) + 1.5f; }   // lateral offset that keeps a box clear of the road
+static void it_ground(float x, float z, float hx, float hz, float *lo, float *hi) {
+  float a = gh(x, z), l = a, h = a, t;
+  t = gh(x - hx, z - hz); if (t < l) l = t; if (t > h) h = t;
+  t = gh(x + hx, z - hz); if (t < l) l = t; if (t > h) h = t;
+  t = gh(x - hx, z + hz); if (t < l) l = t; if (t > h) h = t;
+  t = gh(x + hx, z + hz); if (t < l) l = t; if (t > h) h = t;
+  *lo = l; *hi = h;
+}
+static void it_add(ItCell *C, float x, float z, float hx, float hz, float y0, float y1, int r, int g, int b, int solid) {
+  if (C->n >= ITN) return;
+  ItBox *B = &C->b[C->n++]; B->x = x; B->z = z; B->hx = hx; B->hz = hz; B->y0 = y0; B->y1 = y1; B->r = (uint8_t)r; B->g = (uint8_t)g; B->b = (uint8_t)b; B->solid = (uint8_t)solid;
+}
+static void it_house(ItCell *C, float x, float z, float hx, float hz, float h, int wc) {   // walls + terracotta eaves + roof
+  float lo, hi; it_ground(x, z, hx, hz, &lo, &hi); wc &= 3;
+  it_add(C, x, z, hx, hz, lo - 1.5f, hi + h, ITW[wc][0], ITW[wc][1], ITW[wc][2], 1);
+  it_add(C, x, z, hx + .9f, hz + .9f, hi + h, hi + h + .8f, 186, 86, 52, 0);
+  it_add(C, x, z, hx * .55f, hz * .55f, hi + h + .8f, hi + h + 2.2f, 168, 76, 46, 0);
+}
+static void it_cyp(ItCell *C, float x, float z, float k) {   // cypress: dark trunk-like body + thin tip
+  float lo, hi; it_ground(x, z, .8f, .8f, &lo, &hi);
+  it_add(C, x, z, .8f, .8f, lo - .5f, hi + 9.f * k, 28, 68, 38, 1);
+  it_add(C, x, z, .45f, .45f, hi + 9.f * k, hi + 13.f * k, 24, 60, 34, 0);
+}
+static void it_pine(ItCell *C, float x, float z) {   // umbrella pine
+  float lo, hi; it_ground(x, z, .4f, .4f, &lo, &hi);
+  it_add(C, x, z, .4f, .4f, lo - .5f, hi + 6.5f, 90, 65, 45, 1);
+  it_add(C, x, z, 3.2f, 3.2f, hi + 6.f, hi + 8.4f, 45, 100, 50, 0);
+}
+static void it_gen(ItCell *C, int cz) {
+  C->cz = cz; C->n = 0;
+  float zc = cz * IT_CL + 15.f, xr = it_xc(zc), r0 = it_rnd(cz, 0), r2 = it_rnd(cz, 2), sg = it_rnd(cz, 1) < .5f ? -1.f : 1.f, lo, hi;
+  int vm = ((cz % 12) + 12) % 12;
+  if (vm == 5) {                                          // village, first half: four houses along the street
+    for (int s = -1; s <= 1; s += 2) for (int k = 0; k < 2; k++) {
+      float bz = zc + (k ? 7.5f : -7.5f), hx = 5.5f + it_rnd(cz, 3 + k + s) * 1.5f, h = 7.f + it_rnd(cz, 6 + k * 2 + (s > 0)) * 5.f;
+      it_house(C, it_xc(bz) + s * it_lat(bz, hx, 6.6f), bz, hx, 6.6f, h, (int)(it_rnd(cz, 10 + k + s) * 4.f));
+    }
+    return;
+  }
+  if (vm == 6) {                                          // village, second half: church with bell tower, a house and the fountain
+    float x = xr + it_lat(zc, 6.f, 8.5f);
+    it_house(C, x, zc, 6.f, 8.5f, 9.f, 1);
+    float tx = x - 3.7f, tz = zc - 6.2f; it_ground(tx, tz, 2.3f, 2.3f, &lo, &hi);
+    it_add(C, tx, tz, 2.3f, 2.3f, lo - 1.5f, hi + 22.f, 230, 215, 175, 1);
+    it_add(C, tx, tz, 2.9f, 2.9f, hi + 22.f, hi + 23.f, 186, 86, 52, 0);
+    it_add(C, tx, tz, .9f, .9f, hi + 23.f, hi + 27.f, 168, 76, 46, 0);
+    float hz2 = zc - 7.5f; it_house(C, xr - it_lat(hz2, 5.5f, 6.6f), hz2, 5.5f, 6.6f, 8.f, 2);
+    float fz = zc + 7.5f, fx = xr - it_lat(fz, 1.6f, 1.6f) - 2.f; it_ground(fx, fz, 1.6f, 1.6f, &lo, &hi);
+    it_add(C, fx, fz, 1.6f, 1.6f, lo - .5f, hi + .8f, 150, 148, 142, 1);
+    it_add(C, fx, fz, .3f, .3f, hi + .8f, hi + 2.6f, 130, 170, 200, 1);
+    return;
+  }
+  for (int s = -1; s <= 1; s += 2) {                      // cypress avenue on both sides
+    float z2 = zc + (it_rnd(cz, 20 + (s > 0)) - .5f) * 18.f;
+    it_cyp(C, it_xc(z2) + s * it_lat(z2, .8f, .8f), z2, .85f + it_rnd(cz, 22 + (s > 0)) * .4f);
+  }
+  int q = (int)(r0 * 9.f); if (q > 8) q = 8;
+  switch (q) {
+    case 0: {                                             // farmhouse + shed
+      float x = xr + sg * (it_lat(zc, 6.5f, 5.f) + 4.f + r2 * 8.f);
+      it_house(C, x, zc, 6.5f, 5.f, 7.f, (int)(r2 * 4.f));
+      it_house(C, x + sg * 10.2f, zc + 1.f, 3.f, 2.5f, 4.f, 0);
+    } break;
+    case 1:                                               // umbrella pines
+      for (int i = 0; i < 2; i++) { float pz = zc + (i ? 8.f : -8.f); it_pine(C, it_xc(pz) + sg * (it_lat(pz, .4f, .4f) + 4.f + i * 6.f), pz); }
+      break;
+    case 2:                                               // low stone walls
+      for (int s = -1; s <= 1; s += 2) { float wz = zc + s * 7.f, wx = it_xc(wz) + s * it_lat(wz, .4f, 5.f); it_ground(wx, wz, .4f, 5.f, &lo, &hi); it_add(C, wx, wz, .4f, 5.f, lo - .5f, hi + 1.2f, 165, 155, 135, 1); }
+      break;
+    case 3: {                                             // villa with a tower
+      float x = xr + sg * (it_lat(zc, 7.f, 6.5f) + 3.f);
+      it_house(C, x, zc, 7.f, 6.5f, 8.f, 1);
+      float tx = x + sg * 5.3f, tz = zc + 4.8f; it_ground(tx, tz, 1.7f, 1.7f, &lo, &hi);
+      it_add(C, tx, tz, 1.7f, 1.7f, lo - 1.5f, hi + 15.f, 226, 206, 160, 1);
+      it_add(C, tx, tz, 2.2f, 2.2f, hi + 15.f, hi + 16.f, 186, 86, 52, 0);
+    } break;
+    case 4:                                               // round hay bales
+      for (int i = 0; i < 3; i++) { float bz = zc - 8.f + i * 8.f, bx = it_xc(bz) + sg * (it_lat(bz, .9f, .9f) + 3.f + (i & 1) * 3.f); it_ground(bx, bz, .9f, .9f, &lo, &hi); it_add(C, bx, bz, .9f, .9f, lo - .2f, hi + 1.6f, 214, 184, 92, 1); }
+      break;
+    case 5: {                                             // Roman ruins
+      float x = xr + sg * (it_lat(zc, 4.f, 4.f) + 3.f); it_ground(x, zc, 4.f, 4.f, &lo, &hi);
+      it_add(C, x, zc, 4.f, 4.f, lo - 1.f, hi + .5f, 190, 182, 165, 1);
+      for (int i = 0; i < 4; i++) it_add(C, x + ((i & 1) ? 3.f : -3.f), zc + ((i & 2) ? 3.f : -3.f), .45f, .45f, hi + .5f, hi + .5f + (it_rnd(cz, 30 + i) < .5f ? 5.5f : 3.5f), 225, 218, 200, 1);
+    } break;
+    case 6:                                               // olive grove
+      for (int i = 0; i < 3; i++) { float bz = zc - 9.f + i * 9.f, bx = it_xc(bz) + sg * (it_lat(bz, 1.4f, 1.4f) + 3.f + (i & 1) * 5.f); it_ground(bx, bz, 1.4f, 1.4f, &lo, &hi); it_add(C, bx, bz, 1.4f, 1.4f, lo - .5f, hi + 3.4f, 112, 128, 84, 1); }
+      break;
+    case 7: {                                             // roadside chapel
+      float x = xr + sg * (it_lat(zc, 2.8f, 3.2f) + 6.f);
+      it_house(C, x, zc, 2.8f, 3.2f, 5.f, 1); it_ground(x, zc, 2.8f, 3.2f, &lo, &hi);
+      it_add(C, x, zc, .15f, .15f, hi + 7.2f, hi + 9.2f, 60, 50, 40, 0);
+    } break;
+    default:                                              // vineyard trellises
+      for (int i = 0; i < 4; i++) { float x = xr + sg * (it_lat(zc, .15f, 8.f) + 5.f + i * 3.5f); it_ground(x, zc, .15f, 8.f, &lo, &hi); it_add(C, x, zc, .15f, 8.f, lo - .2f, hi + 1.8f, 70, 110, 40, 1); }
+  }
+}
+static ItCell *it_cell(int cz) {
+  ItCell *C = &itc[cz & 15];
+  if (C->cz != cz || C->n == 0) it_gen(C, cz);
+  return C;
+}
+static void it_node(Node *p, const ItBox *B) {            // soft contact, same scheme as buildings in the city
+  if (p->t == 9 || p->y - p->r >= B->y1 || p->y + p->r <= B->y0) return;
+  float dx = p->x - B->x, dz = p->z - B->z, px = B->hx + p->r - (dx < 0 ? -dx : dx), pz = B->hz + p->r - (dz < 0 ? -dz : dz);
+  if (px <= 0 || pz <= 0) return;
+  if (px < pz) { float sg = dx >= 0 ? 1.f : -1.f; p->x += sg * (px < .03f ? px : .03f); float vn = p->vx * sg; if (vn < 0) p->vx -= vn * sg * 1.1f; p->vz *= .97f; }
+  else { float sg = dz >= 0 ? 1.f : -1.f; p->z += sg * (pz < .03f ? pz : .03f); float vn = p->vz * sg; if (vn < 0) p->vz -= vn * sg * 1.1f; p->vx *= .97f; }
+}
+static void it_collide(void) {
+  if (mapId != 5) return;
+  float cx = (n[4].x + n[5].x) * .5f, cz = (n[4].z + n[5].z) * .5f, reach = ntr >= 0 ? 13.f : 5.f; int c0 = it_cz(cz);
+  for (int c = c0 - 1; c <= c0 + 1; c++) {
+    const ItCell *C = it_cell(c);
+    for (int q = 0; q < C->n; q++) {
+      const ItBox *B = &C->b[q]; if (!B->solid) continue;
+      float dx = B->x - cx, dz = B->z - cz, lim = reach + B->hx + B->hz;
+      if (dx * dx + dz * dz > lim * lim) continue;
+      for (int i = 0; i < 50; i++) it_node(&n[i], B);
+      if (ntr >= 0) for (int i = ntr; i < ntr + 11; i++) it_node(&n[i], B);
+    }
+  }
+}
 static void heading(float *hx, float *hz);
 static void traffic_update(float dt);
 static void bots_clear(void);
@@ -239,10 +394,29 @@ static void rail_box(int mode, float *x0, float *x1, float *z0, float *z1) {   /
   else { *x0 = -26.3f; *x1 = 26.3f; *z0 = -34.3f; *z1 = 34.3f; }
 }
 static int rail_mode_of(int i) { return trafficBehavior == 0 ? ((i & 1) ? 3 : 0) : trafficBehavior; }
+// ---- traffic lights: green 6 s, yellow 2 s, red 6 s; each intersection has its own offset (same index as the lamps drawn in main.c). 0 red, 1 yellow, 2 green
+static int tl_state(int index) {
+  float t = signalClock + index * 4.f; t -= 14.f * (float)(int)(t / 14.f);
+  return t < 6.f ? 2 : (t < 8.f ? 1 : 0);
+}
+// highest speed a car at (x,z) heading (hx,hz) may have to stop before the next non-green intersection straight ahead (99 = free road)
+static float tl_limit(float x, float z, float hx, float hz) {
+  int a0 = city_round(x / 28.f), b0 = city_round(z / 36.f); float best = 99.f;
+  for (int a = a0 - 1; a <= a0 + 1; a++) for (int b = b0 - 1; b <= b0 + 1; b++) {
+    int ix = a - 1, iz = b - 1; if (ix < -4 || ix > 3 || iz < -4 || iz > 3) continue;
+    int st = tl_state((ix + 4) + (iz + 4) * 8); if (st == 2) continue;
+    float dx = a * 28.f - x, dz = b * 36.f - z, f = dx * hx + dz * hz, l = dx * hz - dz * hx;
+    if (l > 5.f || l < -5.f || f < 5.8f || f > 32.f || (st == 1 && f < 13.f)) continue;   // too far / too close (already in the junction) / yellow and too late to stop
+    float v = f > 6.5f ? fsqrt(7.f * (f - 6.5f)) : 0.f; if (v < best) best = v;
+  }
+  return best;
+}
+static void rail_point(int mode, float p, float *x, float *z);
+static int rail_turn(int mode, float p, float hx, float hz);
 static void traffic_reset(void) {
   bots_clear(); policeCar.bot = 0;
   static const float SPEED[5] = {4.5f, 7.f, 9.f, 12.f, 15.f};
-  for (int i = 0; i < MAX_AI; i++) { { float rx0, rx1, rz0, rz1; rail_box(rail_mode_of(i), &rx0, &rx1, &rz0, &rz1); float loop = 2.f * ((rx1 - rx0) + (rz1 - rz0)); int per = trafficBehavior == 0 ? (trafficCount + 1) / 2 : trafficCount, kk = trafficBehavior == 0 ? i / 2 : i; traffic[i].phase = kk * loop / (per > 0 ? per : 1); } traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; traffic[i].bot = 0; }
+  for (int i = 0; i < MAX_AI; i++) { { float rx0, rx1, rz0, rz1; rail_box(rail_mode_of(i), &rx0, &rx1, &rz0, &rz1); float loop = 2.f * ((rx1 - rx0) + (rz1 - rz0)); int per = trafficBehavior == 0 ? (trafficCount + 1) / 2 : trafficCount, kk = trafficBehavior == 0 ? i / 2 : i; traffic[i].phase = kk * loop / (per > 0 ? per : 1); } traffic[i].speed = SPEED[trafficSpeed] * (.9f + (i % 5) * .05f); traffic[i].x = traffic[i].z = traffic[i].hx = traffic[i].hz = 0; traffic[i].bot = 0; traffic[i].cur = traffic[i].speed * (trafficBehavior == 2 ? .7f : 1.f); traffic[i].honkT = 0.f; traffic[i].blink = 0; traffic[i].brake = 0; }
   policeCar.x = (n[4].x + n[5].x) * .5f; policeCar.z = (n[4].z + n[5].z) * .5f - 12.f; policeCar.hx = 0; policeCar.hz = 1;
   traffic_update(0.f);
 }
@@ -250,7 +424,7 @@ static void traffic_update(float dt) {
   if (mapId != 3) return;
   float px = (n[4].x + n[5].x) * .5f, pz = (n[4].z + n[5].z) * .5f, hx, hz; heading(&hx, &hz);
   if (trafficEnabled) for (int i = 0; i < trafficCount; i++) {
-    TrafficCar *car = &traffic[i];
+    TrafficCar *car = &traffic[i]; if (car->honkT > 0.f) car->honkT -= dt;
     if (car->bot) continue;                                  // driven by the physics engine
     if (trafficBehavior == 1) {
       float distance = 5.f + (i / 4) * 2.5f, side = ((i % 4) - 1.5f) * 2.f, rx = hz, rz = -hx;
@@ -262,12 +436,20 @@ static void traffic_update(float dt) {
     }
     float x0, x1, z0, z1; rail_box(rail_mode_of(i), &x0, &x1, &z0, &z1);   // lane rectangle, inset from the road centre lines
     float W = x1 - x0, Hh = z1 - z0, loop = 2.f * (W + Hh);
-    car->phase += car->speed * (trafficBehavior == 2 ? .7f : 1.f) * dt; while (car->phase >= loop) car->phase -= loop;
+    float nominal = car->speed * (trafficBehavior == 2 ? .7f : 1.f);
+    { float tgt = nominal, tl = tl_limit(car->x, car->z, car->hx, car->hz); int md = rail_mode_of(i); if (tl < tgt) tgt = tl;   // red / yellow light ahead
+      for (int j = 0; j < trafficCount; j++) { if (j == i || traffic[j].bot || rail_mode_of(j) != md) continue;                 // keep a distance behind the car in front
+        float dp = traffic[j].phase - car->phase; if (dp < 0.f) dp += loop;
+        if (dp > 2.5f && dp < 9.f) { float g = traffic[j].cur + (dp - 5.5f) * 1.3f; if (g < traffic[j].cur * .85f) g = traffic[j].cur * .85f; if (g < tgt) tgt = g; } }
+      if (dt > 0.f) { float dv = tgt - car->cur, mx = (dv < 0.f ? 7.f : 3.f) * dt; car->cur += dv > mx ? mx : (dv < -mx ? -mx : dv); }
+      car->brake = car->cur < nominal * .75f; }
+    car->phase += car->cur * dt; while (car->phase >= loop) car->phase -= loop;
     float p = car->phase;
     if (p < Hh) { car->x = x0; car->z = z0 + p; car->hx = 0; car->hz = 1; }
     else if (p < Hh + W) { car->x = x0 + p - Hh; car->z = z1; car->hx = 1; car->hz = 0; }
     else if (p < 2.f * Hh + W) { car->x = x1; car->z = z1 - (p - Hh - W); car->hx = 0; car->hz = -1; }
     else { car->x = x1 - (p - 2.f * Hh - W); car->z = z0; car->hx = -1; car->hz = 0; }
+    car->blink = (int8_t)rail_turn(rail_mode_of(i), car->phase, car->hx, car->hz);   // turn signal before a corner
   }
   for (int i = 0; i < trafficCount && trafficEnabled; i++) if (!traffic[i].bot) city_push_out(&traffic[i].x, &traffic[i].z, 1.2f);   // other city plans move the buildings
   if (pursuitEnabled && !policeCar.bot) {
@@ -280,6 +462,7 @@ static void traffic_update(float dt) {
     if (policeCar.x < -CITY_X_LIMIT + 3.f) policeCar.x = -CITY_X_LIMIT + 3.f; if (policeCar.x > CITY_X_LIMIT - 3.f) policeCar.x = CITY_X_LIMIT - 3.f;
     if (policeCar.z < -CITY_Z_LIMIT + 3.f) policeCar.z = -CITY_Z_LIMIT + 3.f; if (policeCar.z > CITY_Z_LIMIT - 3.f) policeCar.z = CITY_Z_LIMIT - 3.f;
   }
+  if (policeCar.honkT > 0.f) policeCar.honkT -= dt;
   signalClock += dt;
 }
 
@@ -358,10 +541,16 @@ static void spawn_objects(void) {
     for (int i = 0; i < 3; i++) add_box(0, i & 1 ? 2.5f : -2.5f, 40.f + i * 16.f);
     add_box(1, -1.2f, 125.f); add_box(2, 1.2f, 125.f); add_box(3, 0, 170.f);
     add_box(4, -2.f, 200.f); add_box(4, 2.f, 200.f); add_box(6, 0.f, 215.f); tire_wall(0.f, 235.f, 3);
+  } else if (mapId == 4 && cmap >= 0) {
+    for (int i = 0; i < cmNobj; i++) add_box(cmOk[i], cmOx[i], cmOz[i]);
   } else if (mapId == 4) {
     tire_wall(14.f, 22.f, 3);
     add_box(4, -10.f, 18.f); add_box(4, -11.2f, 18.f); add_box(4, -10.6f, 19.2f); add_box(4, -10.6f, 16.8f); add_box(4, 30.f, 20.f); add_box(4, 31.2f, 20.f);
     add_box(6, -6.f, 15.f); add_box(6, 6.f, 15.f); add_box(6, 0.f, 12.f);
+  } else if (mapId == 5) {                              // Italy: cones, crates, barrels and a tyre wall on the road
+    for (int i = 0; i < 3; i++) { float z = 45.f + i * 16.f; add_box(0, it_xc(z) + (i & 1 ? 2.5f : -2.5f), z); }
+    add_box(1, it_xc(125.f) - 1.2f, 125.f); add_box(2, it_xc(125.f) + 1.2f, 125.f); add_box(3, it_xc(170.f), 170.f);
+    add_box(4, it_xc(200.f) - 2.f, 200.f); add_box(4, it_xc(200.f) + 2.f, 200.f); add_box(6, it_xc(215.f), 215.f); tire_wall(it_xc(235.f), 235.f, 3);
   }
 }
 static void car_init(float x0, float z0, float hx, float hz, float lift, int objs) {
@@ -370,6 +559,7 @@ static void car_init(float x0, float z0, float hx, float hz, float lift, int obj
   fx_reset();
   float rx = hz, rz = -hx, oy = gh(x0, z0) + lift;
   engA = ENG[ce].a * V->pw * tunePower; engV = ENG[ce].v; gearNow = 1; engineRpm = 900.f; engineOutput = .45f; latG = W->gr * V->gr * tuneGrip; if (latG > .45f) latG = .45f; gsx = V->sx; gsz = V->sz;
+  dev_apply();   // mode dev: ses valeurs priment sur celles du modele (sans effet sur les bots)
   for (int i = 0; i < NC; i++) {
     int w = i >= 14 && i < 18, pn = i >= 22;
     float qx = P[i][0] * V->sx, qy = w ? W->r : P[i][1] * V->sy, qz = P[i][2] * V->sz;
@@ -451,7 +641,7 @@ static void engine_update(float speed, float dt) {
     float tr = 900.f + (thr > 0.f ? thr : 0.f) * 6100.f, k = dt * 6.f; if (k > 1.f) k = 1.f; freeRpm += (tr - freeRpm) * k;
     if (clutchKey > .5f || shiftT > 0.f || gearNow == 0) { engineRpm = stallT > 0.f ? 0.f : freeRpm; engineOutput = 0.f; engBrake = .35f; return; }
   }
-  float vmax = engV * (turbo ? 1.5f : 1.f), limit = vmax * GEAR_TOP[gearNow - 1];
+  float vmax = engV * (turbo ? devTV : 1.f), limit = vmax * GEAR_TOP[gearNow - 1];
   engineRpm = 900.f + speed / (limit + .001f) * 5600.f;
   if (engineRpm > 7000.f) engineRpm = 7000.f;
   if (manualGear) { }   // manual gearbox: the driver changes gears
@@ -494,14 +684,14 @@ static void tire(Node *p, float fx, float fz, float nx, float ny, float nz, int 
   { float J = d / p->im * .7f; latX -= lx * J; latY -= ly * J; latZ -= lz * J; }  // ...the rest through the whole body (no tipping over)
   if (!drive || hb > .3f) return;
   float vf = p->vx * tx + p->vy * ty + p->vz * tz;
-  float eV = engV * (turbo ? 1.5f : 1.f), eA = engA * 1.8f * (turbo ? 2.2f : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff * (.55f + .45f * tpf);
+  float eV = engV * (turbo ? devTV : 1.f), eA = engA * 1.8f * (turbo ? devTA : 1.f) * engineOutput * (.3f + .7f * gripF) * driveEff * (.55f + .45f * tpf);
   if (thr != 0 && !(thr < 0 && vf < -10)) {   // no top-speed cut-off
 #ifdef THRUSTBODY
     thrustAcc += thr * eA * dt * .25f;
 #else
     float a2 = thr * eA * dt; p->vx += tx * a2; p->vy += ty * a2; p->vz += tz * a2;
 #endif
-  } else if (thr == 0.f && (vf > .5f || vf < -.5f)) { float drag = engA * .018f * dt * engBrake * (vf > 0 ? 1.f : -1.f); p->vx -= tx * drag; p->vy -= ty * drag; p->vz -= tz * drag; }
+  } else if (thr == 0.f && (vf > .5f || vf < -.5f)) { float drag = engA * devEB * dt * engBrake * (vf > 0 ? 1.f : -1.f); p->vx -= tx * drag; p->vy -= ty * drag; p->vz -= tz * drag; }
   if (brk > 0) { float bf = 1.f - .05f * brk * tuneBrake * weatherGrip * (.4f + .6f * gripF); p->vx *= bf; p->vy *= bf; p->vz *= bf; }
 }
 static void obj_remove(int oi) {                          // silently removes an object (settings: objects off)
@@ -528,7 +718,7 @@ static void barrel_blow(int oi) {                         // explosive barrel: b
 // Cars (player and bots) collide with the solid ones exactly like with the buildings: nodes are pushed out softly.
 enum { EK_WRECK, EK_POLICE, EK_AMBU, EK_BARRIER, EK_PILE, EK_TRUCKW, EK_CONE, EK_CCAR, EK_CTRUCK };
 typedef struct { float x, z, hx, hz, hl, hw, h, vx, vz, ph, spd; uint8_t kind, r, g, b, solid, mv, mode; } EBox;
-#define EBOX_MAX 64
+#define EBOX_MAX 48
 static EBox ebx[EBOX_MAX]; static int nebx, evCnt[3];   // evCnt: accidents, roadworks, convoys generated this game
 static void ev_node(Node *p, const EBox *B) {
   if (p->t == 9 || p->y - p->r >= B->h || p->y + p->r <= 0.f) return;
@@ -557,6 +747,17 @@ static int ev_near(float x, float z, float r) {            // is a fixed event o
   if (!optEvents || mapId != 3) return 0;
   for (int e = 0; e < nebx; e++) { const EBox *B = &ebx[e]; if (B->mv) continue; float dx = B->x - x, dz = B->z - z; if (dx * dx + dz * dz < r * r) return 1; }
   return 0;
+}
+// solid parts of a station, relative to the block centre: 3 pump islands and the kiosk (dx, dz, half x, half z, height)
+static const float STB[4][5] = {{-4.f, 0.f, .45f, 1.1f, 1.4f}, {0.f, 0.f, .45f, 1.1f, 1.4f}, {4.f, 0.f, .45f, 1.1f, 1.4f}, {0.f, -8.2f, 3.5f, 1.6f, 3.f}};
+static void st_collide(Node *p, float bx, float bz) {
+  for (int q = 0; q < 4; q++) {
+    const float *B = STB[q]; if (p->y - p->r >= B[4]) continue;
+    float dx = p->x - (bx + B[0]), dz = p->z - (bz + B[1]), px = B[2] + p->r - (dx < 0 ? -dx : dx), pz = B[3] + p->r - (dz < 0 ? -dz : dz);
+    if (px <= 0 || pz <= 0) continue;
+    if (px < pz) { float sg = dx >= 0 ? 1.f : -1.f; p->x += sg * (px < .025f ? px : .025f); float vn = p->vx * sg; if (vn < 0) p->vx -= vn * sg * 1.1f; p->vz *= .97f; }
+    else { float sg = dz >= 0 ? 1.f : -1.f; p->z += sg * (pz < .025f ? pz : .025f); float vn = p->vz * sg; if (vn < 0) p->vz -= vn * sg * 1.1f; p->vx *= .97f; }
+  }
 }
 static void step(float dt) {
   float hx, hz, thx, thz; heading(&hx, &hz); thx = hx; thz = hz;
@@ -588,7 +789,7 @@ static void step(float dt) {
     } else if (b->f == 3) { if (L - b->l0 > b->bk) b->f = 2; }
     else if (L - b->l0 > b->bk || b->l0 - L > b->bk * 1.4f) {   // panel attachment tears or is crushed
       b->f = 2;
-      if (--pAtt[b->g] * 100 <= pAtt0[b->g] * 45 && pAtt[b->g] > 0) {   // enough attachments gone: the part comes off
+      if (--pAtt[b->g] * 100 <= pAtt0[b->g] * (optBody && n == nPl && (b->g == 1 || b->g == 2) ? 14 : 45) && pAtt[b->g] > 0) {   // enough attachments gone: the part comes off
         int gg = b->g; for (int q = 0; q < nb; q++) if (bm[q].f == 4 && bm[q].g == gg) bm[q].f = 2;
         pAtt[gg] = 0; for (int j = 0; j < PN[gg]; j++) { Node *pn = &n[PB[gg] + j]; pn->vy += 3.5f; pn->vx += (j & 1 ? .8f : -.8f); }
       }
@@ -619,7 +820,7 @@ static void step(float dt) {
   }
   if (mapId == 4 && optRamp) {                                       // vertical loops: contact with the inside of the ring + sideways guidance along the helix
     float sxc = 0, sxx = 0, srt = 0; int cnt = 0;
-    for (int li = 0; li < NLOOP; li++) {
+    for (int li = 0; li < nloopT; li++) {
       float lx = LOOPS[li][0], lz = LOOPS[li][1], R = LOOPS[li][2];
       for (int i = 0; i < nn; i++) {
         Node *p = &n[i]; float adx = p->x - lx; if (adx > 9.f || adx < -9.f) continue;
@@ -646,6 +847,7 @@ static void step(float dt) {
     int ix0, iz0; city_nearest(p->x, p->z, &ix0, &iz0);
     for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) for (int iz = iz0 - 1; iz <= iz0 + 1; iz++) {
       float bx, bz; city_center(ix, iz, &bx, &bz); float height = city_height(ix, iz);
+      if (height <= 0.f && city_is_station(ix, iz)) { st_collide(p, bx, bz); continue; }
       if (height <= 0.f || p->y - p->r >= height) continue;
       float px = 8.5f + p->r - (p->x > bx ? p->x - bx : bx - p->x), pz = 11.f + p->r - (p->z > bz ? p->z - bz : bz - p->z);
       if (px <= 0 || pz <= 0) continue;
@@ -661,7 +863,7 @@ static void step(float dt) {
       }
     }
   }
-  ev_collide();
+  ev_collide(); it_collide();
   for (int i = 0; i < nn; i++) {                         // safety net: a node can never leave the physically possible range
     Node *p = &n[i]; float v2 = p->vx * p->vx + p->vy * p->vy + p->vz * p->vz;
     if (!(v2 == v2) || v2 > 1000.f * 1000.f) { float k = v2 == v2 ? 1000.f / fsqrt(v2) : 0.f; p->vx *= k; p->vy *= k; p->vz *= k; if (!(p->x == p->x) || !(p->y == p->y) || !(p->z == p->z)) { p->x = n[4].x; p->y = n[4].y + 1.f; p->z = n[4].z; } }
@@ -759,7 +961,7 @@ static void fx_update(float dt) {                 // once per frame
   steamI = (radHp < .6f && engTemp > .6f) ? (engTemp - .6f) * 1.5f : 0.f; if (steamI > 1.f) steamI = 1.f;
   float pw = engTemp > 1.f ? 1.f - (engTemp - 1.f) * 1.8f : 1.f; if (pw < 0.f) pw = 0.f;
   float sh = shaftHp > .65f ? 1.f : (shaftHp < .3f ? 0.f : (shaftHp - .3f) / .35f);
-  fuel -= dt * (.0006f + .0035f * ta) * (turbo ? 2.f : 1.f);
+  fuel -= dt * (.0006f + .0035f * ta) * (turbo ? 2.f : 1.f) * (n == nPl ? (float)fuelX : 1.f);
   if (tankHp < .6f && fuel > 0.f) fuel -= dt * (.6f - tankHp) * .12f;                                       // fuel leak
   if (fuel < 0.f) fuel = 0.f;
   if (!burning && fuel > .03f && tankHp < .6f) {                                                             // ignition of a leaking tank
@@ -784,6 +986,26 @@ static void fx_update(float dt) {                 // once per frame
 }
 
 // =====================================================================================================
+// ---- gas stations: stop on the pad under the canopy to refill (10 s from empty to full). stInZone: on a pad, stRefuel: pumping right now. Player only.
+static int stInZone, stRefuel;
+static float station_dist(float x, float z) {              // distance to the nearest station
+  float best = 1e9f;
+  for (int ix = -4; ix < 4; ix++) for (int iz = -4; iz < 4; iz++) { if (!city_is_station(ix, iz)) continue;
+    float bx, bz; city_center(ix, iz, &bx, &bz); float d = (x - bx) * (x - bx) + (z - bz) * (z - bz); if (d < best) best = d; }
+  return fsqrt(best);
+}
+static void refuel_update(float dt, float speed) {
+  stInZone = stRefuel = 0;
+  if (mapId != 3 || dt <= 0.f || burning || exploded) return;
+  if (dt > .1f) dt = .1f;
+  float cx = (n[4].x + n[5].x) * .5f, cz = (n[4].z + n[5].z) * .5f; int ix0, iz0; city_nearest(cx, cz, &ix0, &iz0);
+  for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) for (int iz = iz0 - 1; iz <= iz0 + 1; iz++) {
+    if (!city_is_station(ix, iz)) continue;
+    float bx, bz; city_center(ix, iz, &bx, &bz); float dx = cx - bx, dz = cz - bz;
+    if ((dx < 0 ? -dx : dx) < 8.2f && (dz < 0 ? -dz : dz) < 4.6f) stInZone = 1;
+  }
+  if (stInZone && speed < 2.f && fuel < .999f) { fuel += dt * .1f; if (fuel > 1.f) fuel = 1.f; stRefuel = 1; }
+}
 // ---- Physical bots. A traffic / police car close to the player is promoted from a kinematic "rail" car
 // to a complete soft-body car: same nodes, beams, panels, wheels, engine, radiator, tank, fire and
 // explosion as the player's car, running through the very same step() / fx_update() code.
@@ -791,7 +1013,7 @@ static void fx_update(float dt) {                 // once per frame
 // ---- Technique: the physics code works on the globals n, bm, nn, nb, fuel... Each vehicle owns a Ctx;
 // "entering" a bot swaps the array pointers and copies a few dozen scalars (zero-copy for the big arrays).
 #ifndef MAX_PHYS
-#define MAX_PHYS 3            // simultaneous full-physics bots: about 12 KB RAM and one more car of CPU each
+#define MAX_PHYS 2            // simultaneous full-physics bots: about 12 KB RAM and one more car of CPU each (3 d'origine: reduit pour tenir en RAM avec la carte Italie et les mods)
 #endif
 #define BOT_MB 300            // a car without trailer uses 277 beams
 #ifndef PHYS_NEAR
@@ -843,6 +1065,11 @@ static void rail_point(int mode, float p, float *x, float *z) {
   while (p >= loop) p -= loop; while (p < 0.f) p += loop;
   if (p < H) { *x = x0; *z = z0 + p; } else if (p < H + W) { *x = x0 + p - H; *z = z1; }
   else if (p < 2.f * H + W) { *x = x1; *z = z1 - (p - H - W); } else { *x = x1 - (p - 2.f * H - W); *z = z0; }
+}
+static int rail_turn(int mode, float p, float hx, float hz) {   // does the rail turn within the next ~13 m? -1 left, 1 right, 0 straight
+  float ax, az, bx, bz; rail_point(mode, p + 12.4f, &ax, &az); rail_point(mode, p + 13.6f, &bx, &bz);
+  float dx = bx - ax, dz = bz - az, l = fsqrt(dx * dx + dz * dz) + 1e-4f, s = (dx * hz - dz * hx) / l;
+  return s > .5f ? 1 : (s < -.5f ? -1 : 0);
 }
 static float rail_phase(int mode, float x, float z) {       // closest point of the rails, as a phase
   float x0, x1, z0, z1; rail_box(mode, &x0, &x1, &z0, &z1); float W = x1 - x0, H = z1 - z0, best = 1e9f, ph = 0, c, d;
@@ -955,6 +1182,7 @@ static void bot_ai(Bot *b, float dt, float plx, float plz, float plhx, float plh
   float x = (n[4].x + n[5].x) * .5f, z = (n[4].z + n[5].z) * .5f, rx = hz, rz = -hx, vf = 0;
   for (int i = 0; i < 20; i++) vf += (n[i].vx * hx + n[i].vz * hz) * .05f;
   int police = b->src == PSRC; float tx, tz, vt;
+  if (!police) traffic[b->src].blink = 0;
   if (police) { tx = plx; tz = plz; float dx = tx - x, dz = tz - z, d = fsqrt(dx * dx + dz * dz); vt = d > 8.f ? 12.f : 6.f; }
   else if (trafficBehavior == 1) {
     int i = b->src; float distance = 5.f + (i / 4) * 2.5f, side = ((i % 4) - 1.5f) * 2.f;
@@ -965,6 +1193,8 @@ static void bot_ai(Bot *b, float dt, float plx, float plz, float plhx, float plh
   } else {
     int mode = rail_mode_of(b->src); float ph = rail_phase(mode, x, z), look = 6.f + (vf > 0 ? vf : 0) * .6f;
     rail_point(mode, ph + look, &tx, &tz); vt = traffic[b->src].speed * (mode == 2 ? .7f : 1.f);
+    { float tl = tl_limit(x, z, hx, hz); if (tl < vt) vt = tl; }          // stop at red / yellow lights
+    traffic[b->src].blink = (int8_t)rail_turn(mode, ph, hx, hz);          // turn signal before a corner
     float fx2, fz2; rail_point(mode, ph + look + 9.f, &fx2, &fz2);          // what is coming after: brake before the bend, not in it
     float ax = fx2 - x, az = fz2 - z, al = fsqrt(ax * ax + az * az) + 1e-3f, ar = (ax * rx + az * rz) / al;
     if (absf_(ar) > .35f && vt > 4.f) vt = 4.f;
@@ -986,6 +1216,7 @@ static void bot_ai(Bot *b, float dt, float plx, float plz, float plhx, float plh
       float ext = B->hl > B->hw ? B->hl : B->hw, ex = B->x - x, ez = B->z - z, f = ex * hx + ez * hz - ext, l = ex * rx + ez * rz;
       if (f > 0.f && f < 11.f && l < ext + 1.4f && l > -ext - 1.4f) { float a = (f - 5.8f) * 1.2f; if (a < 0.f) a = 0.f; if (a < vt) vt = a; } }
   }
+  if (!police) traffic[b->src].brake = (vt < vf - .3f || vt < .6f);       // brake lights (read by the renderer)
   if (absf_(vf) < .4f && vt0 > 2.f) b->stuckT += dt; else if (absf_(vf) > 1.f) b->stuckT = 0.f;
   int reversing = b->stuckT > 7.f && b->stuckT < 8.5f; if (b->stuckT >= 8.5f) b->stuckT = 0.f;
   if (driveEff < .05f || exploded || fuel <= .005f) { thr = 0.f; brk = .15f; }   // wreck: dead engine, parked
@@ -1021,6 +1252,7 @@ static void bot_spawn(int slot, int src, float x, float z, float hx, float hz, f
 static void bot_release(Bot *b) {
   TrafficCar *car = b->src == PSRC ? &policeCar : &traffic[b->src];
   if (b->src != PSRC && trafficBehavior != 1) car->phase = rail_phase(rail_mode_of(b->src), car->x, car->z);   // back on the nearest rail point
+  if (b->src != PSRC) car->cur = car->speed * (trafficBehavior == 2 ? .7f : 1.f);
   car->bot = 0; b->used = 0;
 }
 
@@ -1053,7 +1285,7 @@ static void bots_frame(float dt) {
     TrafficCar *car = &traffic[i]; if (car->bot) continue;
     float dx = car->x - plc[0], dz = car->z - plc[1], hl = car->hx * car->hx + car->hz * car->hz;
     if (dx * dx + dz * dz > PHYS_NEAR * PHYS_NEAR || hl < .5f || !bot_clear_at(car->x, car->z, plc)) continue;
-    float v = trafficBehavior == 1 ? 0.f : car->speed * (trafficBehavior == 2 ? .7f : 1.f);
+    float v = trafficBehavior == 1 ? 0.f : car->cur;
     bot_spawn(slot, i, car->x, car->z, car->hx, car->hz, v); car->bot = (uint8_t)(slot + 1); return;
   }
   if (pursuitEnabled && !policeCar.bot) {
@@ -1066,6 +1298,7 @@ static void bots_frame(float dt) {
 
 // ---- car / car contacts: the nodes of one car against the beams of the other (same scheme as objects vs car in step())
 typedef struct { Node *n; Beam *bm; int nbc, ntr; float cx, cz, rad; } VRef;
+static int ctHit;   // set when node_vs_car finds a contact (cars_collide uses it to make traffic honk)
 static void node_vs_car(Node *p, const VRef *B) {
   float dcx = p->x - B->cx, dcz = p->z - B->cz; if (dcx * dcx + dcz * dcz > B->rad * B->rad) return;
   for (int i = 0; i < B->nbc; i++) {
@@ -1075,6 +1308,7 @@ static void node_vs_car(Node *p, const VRef *B) {
     float t = ((p->x - a->x) * ex + (p->y - a->y) * ey + (p->z - a->z) * ez) / el; t = t < 0 ? 0 : (t > 1 ? 1 : t);
     float dx = p->x - (a->x + t * ex), dy = p->y - (a->y + t * ey), dz = p->z - (a->z + t * ez), d2 = dx * dx + dy * dy + dz * dz;
     if (d2 >= CAR_R * CAR_R) continue;
+    ctHit = 1;
     float d = fsqrt(d2) + 1e-5f, nx = dx / d, ny = dy / d, nz = dz / d, pen = CAR_R - d; if (pen > .15f) pen = .15f;
     float imq = a->im * (1 - t) * (1 - t) + q->im * t * t, it = p->im + imq, cp = pen / it;
     p->x += nx * cp * p->im; p->y += ny * cp * p->im; p->z += nz * cp * p->im;
@@ -1152,13 +1386,17 @@ static void car_hits(const VRef *A, const VRef *B) {
   if (A->ntr >= 0) for (int i = A->ntr; i < A->ntr + ntrN; i++) node_vs_car(&A->n[i], B);
 }
 static void cars_collide(void) {
-  VRef v[MAX_PHYS + 1]; int m = 0;
+  VRef v[MAX_PHYS + 1]; int vs[MAX_PHYS + 1], m = 0; vs[0] = -1;
   v[m++] = (VRef){n, bm, nbc, ntr, (n[4].x + n[5].x) * .5f, (n[4].z + n[5].z) * .5f, ntr >= 0 ? 10.f : 3.8f};
-  for (int s = 0; s < MAX_PHYS; s++) if (bots[s].used) v[m++] = (VRef){bots[s].nd, bots[s].bd, bots[s].c.nbc, -1, (bots[s].nd[4].x + bots[s].nd[5].x) * .5f, (bots[s].nd[4].z + bots[s].nd[5].z) * .5f, 3.8f};
+  for (int s = 0; s < MAX_PHYS; s++) if (bots[s].used) vs[m] = s, v[m++] = (VRef){bots[s].nd, bots[s].bd, bots[s].c.nbc, -1, (bots[s].nd[4].x + bots[s].nd[5].x) * .5f, (bots[s].nd[4].z + bots[s].nd[5].z) * .5f, 3.8f};
   for (int a = 0; a < m; a++) for (int c = a + 1; c < m; c++) {
     float dx = v[a].cx - v[c].cx, dz = v[a].cz - v[c].cz, lim = v[a].rad + v[c].rad + .5f;
     if (dx * dx + dz * dz > lim * lim) continue;
-    car_hits(&v[a], &v[c]); car_hits(&v[c], &v[a]);
+    ctHit = 0; car_hits(&v[a], &v[c]); car_hits(&v[c], &v[a]);
+    if (ctHit && a == 0 && vs[c] >= 0) {                     // the player touched a traffic car: it honks
+      const Bot *hb = &bots[vs[c]]; TrafficCar *tc = hb->src == PSRC ? &policeCar : &traffic[hb->src];
+      if (tc->honkT < 1.f) { tc->honkT = 2.5f; honkMsgT = 1.5f; }
+    }
   }
 }
 // one physics sub-step for the whole scene: the player, every active bot, then the contacts between cars

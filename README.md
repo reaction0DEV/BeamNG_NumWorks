@@ -1,358 +1,111 @@
 # NumBeam3D
 
-NumBeam3D est un simulateur de voiture 3D pour calculatrice NumWorks, inspiré du style BeamNG mais adapté aux contraintes techniques du matériel et du moteur de rendu de la calculatrice.
+Simulateur de conduite et de crash en 3D avec **physique à déformation par poutres** (style BeamNG), écrit en C pour la calculatrice **NumWorks** (application externe `.nwa`).
+Tout tourne en temps réel sur la calculatrice : rendu 3D logiciel, physique de carrosserie déformable, trafic, météo, défis et sauvegarde des records.
 
-Le projet produit une application autonome, avec une ville simplifiée, un trafic routier, une chasse au police, plusieurs paramètres de conduite et un rendu pseudo-3D sur écran monochrome / couleur de la NumWorks.
+> Le jeu est entièrement en français et en ASCII (la police de la calculatrice ne gère pas les accents).
 
-## Sommaire
+## Points forts
 
-- Aperçu du projet
-- Fonctionnalités
-- Prérequis
-- Installation des dépendances
-- Compilation locale
-- Transformation en paquet .nwa
-- Structure du dépôt
-- Contrôles de jeu
-- Dépannage
-- Limites connues
+- **Carrosserie déformable** : la voiture est un maillage de nœuds et de poutres. Elle se plie, se casse, perd ses vitres, ses rétroviseurs et ses pare-chocs.
+- **Systèmes mécaniques** : radiateur, réservoir, boîte, transmission, pneus (crevaisons), carburant, incendie et explosion.
+- **6 cartes** : Circuit, Route, Crash-test, Ville, Vide (rampes et loopings) et **Italie** (route de campagne sans fin, villages, collines toscanes).
+- **16 véhicules**, 4 moteurs, 4 types de roues, 4 suspensions, 3 châssis, 4 remorques.
+- **Défis** : livraisons chronométrées, crash-tests, tutoriel, 29 succès, statistiques à vie.
+- **Mods en Python** : ajoute tes véhicules, cartes, pouvoirs et modes de jeu avec de simples scripts, sans recompiler (voir [`MANUEL_MODS.md`](MANUEL_MODS.md)).
+- **Mode développeur** : 10 variables physiques réglables (gravité, adhérence, vitesse max, turbo…).
 
-## Aperçu du projet
+La liste complète de ce que contient le programme est dans [`CONTENU.md`](CONTENU.md).
 
-Ce projet est conçu pour la plateforme NumWorks et repose sur :
+## Contenu du dépôt
 
-- un moteur de rendu 3D simple basé sur la projection de points / faces
-- une ville maillée avec rues, batiments, panneaux et objets décoratifs
-- une simulation de déplacement et d’accélération simplifiée
-- des options rapides de réglage du véhicule et du monde
-- un packaging pour la calculatrice via l’outil EADK / nwlink
+| Fichier | Rôle |
+|---|---|
+| `src/main.c` | Programme principal : rendu, interface, menus, défis, mods |
+| `src/sim.h` | Moteur de simulation : physique, cartes, trafic, événements, bots |
+| `src/epsilon_app.h` | Protection de la calculatrice (touche Home) pour une application externe |
+| `src/epsilon_files.h` | Lecture/écriture de fichiers dans le système de fichiers d'Epsilon (sauvegardes) |
+| `icon.png` | Icône de l'application |
+| `Makefile` | Compilation et installation |
+| `COMPILER.md` | Guide pas à pas pour compiler et installer |
+| `MANUEL_MODS.md` | Manuel complet des mods Python |
+| `exemple_mods.py` | Exemple de script de mods |
+| `CONTENU.md` | Inventaire de tout ce que contient le jeu |
 
-## Fonctionnalités
+## Compilation
 
-- voiture jouable avec accélération, freinage et direction
-- ville générée avec quartiers et plans de rue variés
-- projet urbain avec batiments, parkings, station-service, garages et zones de travaux
-- trafic IA avec véhicules de circulation
-- police poursuivante qui suit le joueur
-- météo légère : clair, pluie, brouillard et verglas
-- réglages rapides : puissance, adhérence, suspension et freinage
-- garage et réparation du véhicule
-- tutoriel et options de jeu
-- rendu 3D et affichage de scène sur l’écran de la NumWorks
+Prérequis : `arm-none-eabi-gcc`, `arm-none-eabi-binutils` et Node.js (pour `nwlink`, téléchargé automatiquement par `npx`).
 
-## Prérequis
-
-Avant de compiler, il faut avoir :
-
-- un environnement Linux ou macOS
-- `make`
-- `gcc` standard du système
-- `arm-none-eabi-gcc`
-- le paquet NumWorks EADK accessible via `npx --yes -- nwlink@1.0.0`
-
-Vérification rapide :
-
-```bash
-arm-none-eabi-gcc --version
-make --version
-npx --yes -- nwlink@1.0.0 --help
+```sh
+make          # compile output/numbeam3d.nwa
+make check    # vérifie les liens et affiche la taille installée
+make run      # installe sur la calculatrice branchée en USB
+make clean    # supprime output/
 ```
 
-## Installation des dépendances
+Guide détaillé (Windows, macOS, Linux, dépannage) : [`COMPILER.md`](COMPILER.md).
 
-Le projet utilise l’outil `nwlink` pour récupérer les flags et les outils de packaging NumWorks.
+Le Makefile attend les sources dans `src/` (`main.c`, `sim.h`, `epsilon_app.h`, `epsilon_files.h`) et `icon.png` à la racine, à côté du `Makefile`.
 
-La commande du `Makefile` est déjà configurée :
+## Installation
 
-```bash
-npx --yes -- nwlink@1.0.0 eadk-cflags-device
+1. Compile (`make`) ou récupère `numbeam3d.nwa`.
+2. Branche la NumWorks en USB, puis `make run` (ou envoie le `.nwa` depuis [my.numworks.com](https://my.numworks.com)).
+3. Lance l'application **NumBeam3D** depuis l'écran d'accueil.
+
+Les records, statistiques, succès, favoris et réglages sont sauvegardés dans le système de fichiers de la calculatrice.
+
+## Commandes par défaut
+
+Toutes les touches sont reconfigurables (Options → Conduite → Commandes).
+
+| Action | Touche |
+|---|---|
+| Accélérer / Freiner | Haut / Bas |
+| Gauche / Droite | Gauche / Droite |
+| Remettre / rejouer | OK |
+| Capot / Portes / Coffre | Var / x,n,t / Exp |
+| Tout ouvrir ou fermer | Shift |
+| Poutres (filaire) | Boîte à outils |
+| Vue du dessus / Dégâts | Ln / Log |
+| Caméra gauche, droite, haut, bas | 4, 6, 8, 2 |
+| Zoom + / − | 7 / 9 |
+| Caméra reset | 5 |
+| Menu rapide (favoris) | EXE |
+| Turbo (maintenir) | Effacer |
+| Vue habitacle | 0 |
+| Rapport sup. / inf. | 3 / 1 |
+| Boîte auto / manuelle | − |
+| Embrayage / Frein à main (maintenir) | Alpha / Puissance |
+| Mini-carte | Sin |
+| Essence (maintenir) | Cos |
+| Temps : stop / ralentir / accélérer | √ / ( / ) |
+| Refaire la dernière option rapide | + |
+| Favoris (accès direct) | Virgule |
+| Tutoriel : étape suivante | Point |
+
+## Mods Python
+
+Écris un script dans l'application **Python** de la calculatrice, commence-le par `# numbeam`, et le jeu le lit au démarrage :
+
+```python
+# numbeam
+vehicule("Fusee", 0.9, 0.8, 1.3, 0.8, 2.0, 1.1, couleur=(255, 40, 120))
+carte("Arene", sol=(90, 170, 90))
+rampe(0, 8, 30, 45, 0, 6)
+pouvoir("Lune", gravite=3, duree=15)
+mode("Course lunaire", carte="Arene", vehicule="Fusee", gravite=6)
 ```
 
-Si cette commande fonctionne, le projet est prêt à compiler.
+Limites : 8 véhicules, 4 cartes, 8 pouvoirs, 8 modes. Détails dans [`MANUEL_MODS.md`](MANUEL_MODS.md).
 
-## Compilation locale
+## Notes techniques
 
-Depuis la racine du dépôt :
+- C11, `-Os`, calculs en simple précision, aucune allocation dynamique (ni `malloc`).
+- Rendu 3D logiciel dans un tampon 16 bits (RGB565), triés par profondeur, avec météo (pluie, brouillard, verglas).
+- La carte Italie est générée à la volée par cellules de 30 m (déterministe et mise en cache) : la route peut se poursuivre indéfiniment sans coût mémoire.
+- Les cartes perso des mods utilisent le moteur de la carte Vide.
 
-```bash
-make build
-```
+## Licence
 
-Cette commande compile le fichier principal et produit les artefacts dans le dossier `output/`.
-
-### Commandes utiles
-
-Build simple :
-
-```bash
-make build
-```
-
-Build + génération du fichier binaire empaqueté :
-
-```bash
-make check
-```
-
-Vérification du package et liste du contenu généré :
-
-```bash
-ls -l output/
-```
-
-## Transformer le projet en .nwa
-
-Le packaging officiel NumWorks est produit automatiquement par le `Makefile`.
-
-### Étape 1 : compiler le projet
-
-```bash
-make build
-```
-
-### Étape 2 : générer le paquet final
-
-```bash
-make check
-```
-
-Cette commande exécute :
-
-```bash
-npx --yes -- nwlink@1.0.0 nwa-bin output/numbeam3d.nwa output/numbeam3d.bin
-```
-
-et produit au minimum :
-
-- `output/numbeam3d.nwa`
-- `output/numbeam3d.bin`
-
-### À quoi servent ces fichiers ?
-
-- `.bin` : binaire brut de l’application
-- `.nwa` : paquet d’application NumWorks prêt à être transféré sur la calculatrice
-
-### Transfert sur la calculatrice
-
-Pour installer l’application sur une NumWorks, il faut utiliser le canal officiel de distribution NumWorks compatible avec les fichiers `.nwa` / `.bin` :
-
-- soit via le logiciel officiel NumWorks / l’outils de transfert associé
-- soit via un outil de transfert compatible avec les paquets approuvés par NumWorks
-
-Le fichier le plus important pour le transfert est :
-
-```bash
-output/numbeam3d.nwa
-```
-
-> En pratique, le `.nwa` est le format de paquet que la calculatrice accepte, tandis que le `.bin` est un artefact intermédiaire utile pour le debug ou le packaging.
-
-## Structure du dépôt
-
-```text
-.
-├── Makefile
-├── README.md
-├── src/
-│   ├── main.c
-│   └── sim.h
-├── output/
-│   ├── numbeam3d.nwa
-│   ├── numbeam3d.bin
-│   └── ...
-└── ...
-```
-
-Détail des fichiers :
-
-- `src/main.c` : rendu, interface utilisateur, moteur de scène, menus, ville et objets
-- `src/sim.h` : simulation physique, IA, ville, conditions météo, réglages de conduite
-- `Makefile` : règles de compilation et de packaging NumWorks
-- `output/` : artefacts générés (`.bin`, `.nwa`)
-
-## Screenshots
-
-Les captures ci-dessous sont des exemples de ce que l’on peut attendre visuellement du jeu une fois compilé et exécuté sur la NumWorks.
-
-> Les images peuvent varier selon la résolution écran, la qualité de rendu choisie et la version du paquet final.
-
-### Vue de ville
-
-```text
-+-----------------------------------------------+
-|  NumBeam3D                                    |
-|  Quartiers / routes / batiments               |
-|  Plan de ville / route / environnement         |
-|                                               |
-|      .----.    .----.   .----.                 |
-|     /____/    /____/   /____/                 |
-|                                               |
-|  route  :   route  :   route                  |
-+-----------------------------------------------+
-```
-
-### Vue de conduite
-
-```text
-+-----------------------------------------------+
-|  voiture / route / panneaux / trafic           |
-|  courbe de route / police / environnement      |
-|                                               |
-|          .---------------------------.          |
-|         /   voiture jouable         \         |
-|        /  _______   _______         \        |
-|       /__/_____/__/_____/            \       |
-+-----------------------------------------------+
-```
-
-### Écran de menu rapide
-
-```text
-+-----------------------------------------------+
-| OPTIONS RAPIDES                                |
-| Reparer tout                                   |
-| Turbo                                           |
-| Voiture                                         |
-| Moteur                                          |
-| Meteo                                           |
-| Plan de ville                                   |
-| Puissance                                       |
-| Adherence                                       |
-| Suspension                                      |
-| Freinage                                        |
-| Poursuite police                                |
-+-----------------------------------------------+
-```
-
-## Installation sur NumWorks
-
-### 1. Générer le paquet
-
-Depuis la racine du dépôt :
-
-```bash
-make check
-```
-
-Cela produit au moins :
-
-```bash
-output/numbeam3d.nwa
-output/numbeam3d.bin
-```
-
-### 2. Préparer le transfert
-
-Le fichier `.nwa` est le paquet à transférer vers la NumWorks.
-
-Le transfert se fait via le mécanisme officiel NumWorks compatible avec les paquets applicatifs.
-
-### 3. Installer sur la calculatrice
-
-1. copier le fichier `.nwa` obtenu dans `output/`
-2. utiliser l’outil officiel de transfert / de package NumWorks
-3. envoyer le paquet sur la calculatrice
-4. installer puis lancer l’application
-
-### 4. Vérifier le lancement
-
-Après installation, lancer l’application directement depuis le menu des applications de la NumWorks.
-
-> En cas d’erreur, vérifier que le paquet a bien été généré dans `output/`, que la calculatrice est compatible et que les outils NumWorks sont correctement installés.
-
-## Contrôles de jeu
-
-Les touches peuvent être modifiées dans les menus de configuration du jeu.
-
-Par défaut / usages courants :
-
-- Accélérer : flèche haut
-- Freiner / reculer : flèche bas
-- Gauche : flèche gauche
-- Droite : flèche droite
-- Menu rapide : touche dédiée
-- Vue / caméra : options de menu
-- Réparations / garage : options du menu et du menu rapide
-
-## Menu rapide et réglages
-
-Le projet expose un menu rapide avec plusieurs options :
-
-- réparation du véhicule
-- turbo
-- changement de voiture
-- changement de moteur
-- remorque / accessoires
-- météo
-- gravité
-- temps
-- trafic IA
-- nombre d’IA
-- comportement IA
-- vitesse IA
-- plan de ville
-- réglages de puissance, adhérence, suspension et freinage
-- poursuite policière
-
-## Dépannage
-
-### Erreur de compilation ARM
-
-Vérifier que le compilateur est bien présent :
-
-```bash
-which arm-none-eabi-gcc
-arm-none-eabi-gcc --version
-```
-
-### Erreur sur `nwlink`
-
-Vérifier que Node.js et `npx` sont installés :
-
-```bash
-node --version
-npm --version
-npx --yes -- nwlink@1.0.0 --help
-```
-
-### Fichier .nwa non généré
-
-Relancer :
-
-```bash
-make clean
-make check
-```
-
-Si le Makefile ne contient pas de cible `clean`, il faut supprimer le dossier `output/` puis relancer.
-
-## Limites connues
-
-- le projet est conçu pour la NumWorks et dépend fortement de ses ressources mémoire et écran
-- le rendu est optimisé pour un style simplifié, pas un vrai moteur 3D complet
-- les modèles urbains et la physique sont volontairement simplifiés pour tenir sur la calculatrice
-- le suivi du portage / le packaging officiel NumWorks dépend des outils autorisés par NumWorks et de la compatibilité de la machine cible
-
-## Commandes de référence
-
-```bash
-make build
-make check
-ls -l output/
-```
-
-## Conclusion
-
-Le projet est prêt à être compilé localement puis transformé en paquet `.nwa` pour la NumWorks. La commande clef est :
-
-```bash
-make check
-```
-
-et le paquet final se trouve dans :
-
-```bash
-output/numbeam3d.nwa
-```
-
-
+À définir par l'auteur (aucune licence n'est fournie avec les sources).
