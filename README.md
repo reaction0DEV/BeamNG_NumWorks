@@ -21,7 +21,7 @@ Everything runs in real time on the calculator: software 3D rendering, deformabl
 - **6 maps**: Circuit, Road, Crash-test, City, Empty (ramps and loops) and **Italy** (endless country road, villages, Tuscan hills).
 - **16 vehicles**, 4 engines, 4 wheel types, 4 suspensions, 3 chassis, 4 trailers.
 - **Challenges**: timed deliveries, crash tests, tutorial, 29 achievements, lifetime statistics.
-- **Python mods**: add your own vehicles, maps, powers and game modes with simple scripts, no recompiling needed (see [`MODS_MANUAL.md`](modding/MODS_MANUAL.md)).
+- **Python mods**: add your own vehicles, maps, powers and game modes with simple scripts, no recompiling needed (see [`MODS_MANUAL.md`](NumBeam3D_EN/modding/MODS_MANUAL.md)).
 - **Developer mode**: 10 adjustable physics variables (gravity, grip, max speed, turbo...), with an optional **safety unlock** to type any value.
 - **Minimap**: in the City and now also in Italy (scrolling map centred on the car).
 - **Road objects option**: cones, crates, barrels and tyre walls can be removed (Options -> World, or the quick menu).
