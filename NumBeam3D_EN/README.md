@@ -21,12 +21,12 @@ Everything runs in real time on the calculator: software 3D rendering, deformabl
 - **6 maps**: Circuit, Road, Crash-test, City, Empty (ramps and loops) and **Italy** (endless country road, villages, Tuscan hills).
 - **16 vehicles**, 4 engines, 4 wheel types, 4 suspensions, 3 chassis, 4 trailers.
 - **Challenges**: timed deliveries, crash tests, tutorial, 29 achievements, lifetime statistics.
-- **Python mods**: add your own vehicles, maps, powers and game modes with simple scripts, no recompiling needed (see [`MODS_MANUAL.md`](modding/MODS_MANUAL.md)).
+- **Python mods**: add your own vehicles, maps, powers and game modes with simple scripts, no recompiling needed (see [`MODS_MANUAL.md`](./NumBeam3D_EN/modding/MODS_MANUAL.md)).
 - **Developer mode**: 10 adjustable physics variables (gravity, grip, max speed, turbo...), with an optional **safety unlock** to type any value.
 - **Minimap**: in the City and now also in Italy (scrolling map centred on the car).
 - **Road objects option**: cones, crates, barrels and tyre walls can be removed (Options -> World, or the quick menu).
 
-The full list of what the program contains is in [`CONTENT.md`](info/CONTENT.md).
+The full list of what the program contains is in [`CONTENT.md`](./NumBeam3D_EN/info/CONTENT.md).
 
 ## Repository contents
 
@@ -54,7 +54,7 @@ make run      # installs on the calculator plugged in via USB
 make clean    # removes output/
 ```
 
-Detailed guide (Windows, macOS, Linux, troubleshooting): [`BUILD.md`](info/BUILD.md).
+Detailed guide (Windows, macOS, Linux, troubleshooting): [`BUILD.md`](./NumBeam3D_EN/info/BUILD.md).
 
 The Makefile expects the sources in `src/` (`main.c`, `sim.h`, `epsilon_app.h`, `epsilon_files.h`) and `icon.png` at the root, next to the `Makefile`.
 
@@ -108,7 +108,7 @@ power("Moon", gravity=3, duration=15)
 mode("Moon race", map="Arena", vehicle="Rocket", gravity=6)
 ```
 
-Limits: 8 vehicles, 4 maps, 8 powers, 8 modes. Details in [`MODS_MANUAL.md`](modding/MODS_MANUAL.md).
+Limits: 8 vehicles, 4 maps, 8 powers, 8 modes. Details in [`MODS_MANUAL.md`](./NumBeam3D_EN/modding/MODS_MANUAL.md).
 
 ## Technical notes
 

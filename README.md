@@ -54,7 +54,7 @@ make run      # installs on the calculator plugged in via USB
 make clean    # removes output/
 ```
 
-Detailed guide (Windows, macOS, Linux, troubleshooting): [`BUILD.md`](info/BUILD.md).
+Detailed guide (Windows, macOS, Linux, troubleshooting): [`BUILD.md`](./NumBeam3D_EN/info/BUILD.md).
 
 The Makefile expects the sources in `src/` (`main.c`, `sim.h`, `epsilon_app.h`, `epsilon_files.h`) and `icon.png` at the root, next to the `Makefile`.
 
@@ -108,7 +108,7 @@ power("Moon", gravity=3, duration=15)
 mode("Moon race", map="Arena", vehicle="Rocket", gravity=6)
 ```
 
-Limits: 8 vehicles, 4 maps, 8 powers, 8 modes. Details in [`MODS_MANUAL.md`](modding/MODS_MANUAL.md).
+Limits: 8 vehicles, 4 maps, 8 powers, 8 modes. Details in [`MODS_MANUAL.md`](./NumBeam3D_EN/modding/MODS_MANUAL.md).
 
 ## Technical notes
 
