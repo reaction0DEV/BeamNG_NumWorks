@@ -1849,7 +1849,7 @@ static int quick_apply(int id, int d, int ok) {
 // Les lignes marquees AV n'apparaissent qu'en mode Avance. Shift = ajouter/retirer des favoris. Les favoris s'ouvrent avec la touche "menu rapide".
 #define AV 0x8000u
 enum { P_FAV, P_OPT, P_VEH, P_WORLD, P_DRIVE, P_DISP, P_TOOLS, P_SYS, P_DEV, P_CHALL, P_PROF, P_MODS, NPAGE };
-enum { O_QUAL = 40, O_STEER, O_CAM, O_FOV, O_VIEW, O_SKID, O_PART, O_OBJ, O_RAMP, O_PUNCT, O_KEYS, O_CTRL, O_SOLID, O_MODE, O_DEV, O_CRASHV, O_FAVRESET, O_DEVRESET, O_TUTO, O_DELIV, O_STATS, O_ACH, O_MODINFO, O_MODRELOAD, O_UNLOCK };
+enum { O_QUAL = 40, O_STEER, O_CAM, O_FOV, O_VIEW, O_SKID, O_PART, O_OBJ, O_RAMP, O_PUNCT, O_KEYS, O_CTRL, O_SOLID, O_MODE, O_DEV, O_CRASHV, O_FAVRESET, O_DEVRESET, O_TUTO, O_DELIV, O_STATS, O_ACH, O_MODINFO, O_MODRELOAD, O_UNLOCK, O_GOD };
 #define NAV(p) (100 + (p))
 #define DV(i) (128 + (i))
 #define NFAV 8
@@ -1862,7 +1862,7 @@ static const uint16_t PT_DRIVE[] = {8, 1, O_STEER, O_CAM, O_CTRL, O_PUNCT | AV};
 static const uint16_t PT_DISP[] = {O_QUAL, 32, 33 | AV, O_FOV | AV, O_VIEW | AV, O_SKID | AV, O_PART | AV};
 static const uint16_t PT_TOOLS[] = {0, 36, 2, 22, 23, 9, 27 | AV, 21 | AV};
 static const uint16_t PT_SYS[] = {O_KEYS | AV, O_DEV | AV, NAV(P_DEV), O_FAVRESET | AV};
-static const uint16_t PT_DEV[] = {DV(0), DV(1), DV(2), DV(3), DV(4), DV(5), DV(6), DV(7), DV(8), DV(9), O_UNLOCK, O_DEVRESET};
+static const uint16_t PT_DEV[] = {DV(0), DV(1), DV(2), DV(3), DV(4), DV(5), DV(6), DV(7), DV(8), DV(9), O_UNLOCK, O_GOD, O_DEVRESET};
 static const uint16_t PT_CHALL[] = {O_DELIV, O_TUTO, O_CRASHV, NAV(P_MODS)};
 static const uint16_t PT_PROF[] = {O_STATS, O_ACH};
 #define PLEN(t) ((uint8_t)(sizeof(t) / sizeof((t)[0])))
@@ -1907,7 +1907,9 @@ static char *fmtf(char *p, float v, int dec) {
   if (dec) { *p++ = '.'; int f = q % mul; for (int dv = mul / 10; dv >= 1; dv /= 10) *p++ = (char)('0' + f / dv % 10); *p = 0; }
   return p;
 }
-static int devUnlock;                                       // debridage: plus aucune limite de securite sur les variables dev (valeur libre)
+static int devUnlock, godOn;   // godOn: unbreakable mode requested (only active while developer mode is on)
+static void god_sync(void) { optGod = devOn && godOn; }
+                                     // debridage: plus aucune limite de securite sur les variables dev (valeur libre)
 static char numBuf[12]; static int numLen, numI;            // saisie directe d une valeur (etat S_NUM)
 #define DEV_BIG 100000.f                                    // seule limite restante: evite les valeurs infinies / NaN
 static float dev_lo(int i) { return devUnlock ? -DEV_BIG : DEVM[i].lo; }
@@ -2266,6 +2268,7 @@ static void item_text(int id, char *s) {
     case O_CRASHV: p = cat(p, "Vitesse crash-test: "); p = num(p, CRASHV[crashI]); cat(p, " km/h"); break;
     case O_FAVRESET: cat(p, "Favoris: remettre par defaut (OK)"); break;
     case O_UNLOCK: cat(p, devUnlock ? "Debridage securite: OUI (libre)" : "Debridage securite: non"); break;
+    case O_GOD: cat(p, godOn ? "Incassable (rien ne casse): OUI" : "Incassable (rien ne casse): non"); break;
     case O_DEVRESET: cat(p, "Variables dev: tout reinitialiser (OK)"); break;
     case O_TUTO: cat(p, "Tutoriel  >"); break;
     case O_DELIV: cat(p, "Livraisons  >"); break;
@@ -2295,7 +2298,7 @@ static void draw_page(const uint16_t *it, int cnt, int sel) {
 static void cfg_save(void) {
   uint32_t w[CFG_N]; for (int i = 0; i < CFG_N; i++) w[i] = 0;
   w[0] = CFG_MAGIC; for (int i = 0; i < NFAV; i++) w[1 + i / 4] |= (uint32_t)fav[i] << (8 * (i % 4));
-  w[3] = (uint32_t)(advMode | (devOn << 1) | (devUnlock << 2)); w[4] = devSet;
+  w[3] = (uint32_t)(advMode | (devOn << 1) | (devUnlock << 2) | (godOn << 3)); w[4] = devSet;
   for (int i = 0; i < NDEV; i++) { union { float f; uint32_t u; } c; c.f = devOv[i]; w[5 + i] = c.u; }
   w[CFG_N - 1] = rec_sum(w, CFG_N - 1);
   ef_write(CFG_FILE, w, sizeof(w));
@@ -2306,7 +2309,7 @@ static void cfg_load(void) {
   for (uint32_t i = 0; i < n; i++) ((uint8_t *)w)[i] = src[i];                  // le fichier n'est pas aligne: copie octet par octet
   if (w[0] != CFG_MAGIC || w[CFG_N - 1] != rec_sum(w, CFG_N - 1)) return;
   for (int i = 0; i < NFAV; i++) { int id = (int)((w[1 + i / 4] >> (8 * (i % 4))) & 255u); fav[i] = (uint8_t)((id < QUICK_COUNT || (id >= 40 && id <= O_ACH) || (id >= 128 && id < 128 + NDEV) || (id >= MOD_POW0 && id < MOD_MODE0 + MOD_MAXM)) ? id : 255); }
-  advMode = (int)(w[3] & 1u); devOn = (int)((w[3] >> 1) & 1u); devUnlock = (int)((w[3] >> 2) & 1u); devSet = (uint16_t)(w[4] & ((1u << NDEV) - 1u));
+  advMode = (int)(w[3] & 1u); devOn = (int)((w[3] >> 1) & 1u); devUnlock = (int)((w[3] >> 2) & 1u); godOn = (int)((w[3] >> 3) & 1u); god_sync(); devSet = (uint16_t)(w[4] & ((1u << NDEV) - 1u));
   for (int i = 0; i < NDEV; i++) { union { float f; uint32_t u; } c; c.u = w[5 + i]; devOv[i] = c.f; if (!(devOv[i] >= dev_lo(i) && devOv[i] <= dev_hi(i))) devSet &= (uint16_t)~(1u << i); }
 }
 static void draw_tutorial(void) {
@@ -2576,8 +2579,9 @@ int main(void) {
           case O_SOLID: solid = (solid + 3 + d) % 3; if (!pgInGame) menu_init(); break;
           case O_CRASHV: crashI = (crashI + 5 + d) % 5; break;
           case O_MODE: advMode ^= 1; cfg_save(); break;
-          case O_DEV: devOn ^= 1; if (devOn) dev_apply(); else dev_reset_all(); cfg_save(); break;
+          case O_DEV: devOn ^= 1; if (devOn) dev_apply(); else dev_reset_all(); god_sync(); cfg_save(); break;
           case O_FAVRESET: if (O) { fav_default(); cfg_save(); pgMsg = "Favoris remis par defaut"; pgMsgT = 40; } break;
+          case O_GOD: if (!devOn) { pgMsg = "Active le mode developpeur"; pgMsgT = 40; } else { godOn ^= 1; god_sync(); cfg_save(); } break;
           case O_UNLOCK: if (!devOn) { pgMsg = "Active le mode developpeur"; pgMsgT = 40; } else { devUnlock ^= 1; if (!devUnlock) dev_unlock_off(); else { pgMsg = "Limites retirees: tout peut casser"; pgMsgT = 60; } cfg_save(); } break;
           case O_DEVRESET: if (O) { dev_reset_all(); cfg_save(); pgMsg = "Variables reinitialisees"; pgMsgT = 40; } break;
           case O_KEYS: if (O) { pgSelSave = sel; st = S_KEYS; redraw = 1; } break;
@@ -2590,7 +2594,7 @@ int main(void) {
           case O_TUTO: if (O) { fav_ensure(0); fav_ensure(1); cfg_save(); mapBak = mapId; mapId = 3; tutOn = 1; tutStep = tutFlag = tutOk = evDmg = evRepair = 0; yawO = hO = dO = 0; tHood = tDoor = tTrunk = oHood = oDoor = oTrunk = 0; startpos(); st = S_GAME; lap = 1; best = 0; cp = 0; lapT = eadk_timing_millis(); last = lapT; acc = 0; eadk_display_push_rect_uniform(eadk_screen_rect, 0); } break;
           default: break; }
       }
-      if (st == S_PAGE && pressed(k, eadk_key_shift) && id >= 0 && id != O_MODINFO && id != O_MODRELOAD && id != O_UNLOCK && (id < 100 || id >= 128)) {      // Shift: ajouter / retirer des favoris
+      if (st == S_PAGE && pressed(k, eadk_key_shift) && id >= 0 && id != O_MODINFO && id != O_MODRELOAD && id != O_UNLOCK && id != O_GOD && (id < 100 || id >= 128)) {      // Shift: ajouter / retirer des favoris
         int r = fav_toggle(id); cfg_save(); redraw = 1;
         pgMsg = r < 0 ? "Favoris pleins (8 max)" : (r ? "Ajoute aux favoris" : "Retire des favoris"); pgMsgT = 40; }
       if (st == S_PAGE && !closeP) {

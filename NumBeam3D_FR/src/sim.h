@@ -7,6 +7,7 @@
 #define NG 10
 #define MAX_AI 64
 static float G = 14.f, gripF = 1.f; static int turbo;
+static int optGod;   // dev: unbreakable mode (player car): no beam breaks or bends, no fire, no leak, no puncture, engine never fails
 static int optSkid = 1, optPart = 1, optObj = 1, optRamp = 1, optPunct = 1, optEvents = 1, optBody = 1;   // settings: tyre marks, particles, objects, ramps/loops, punctures
 static int manualGear, clutchAssist = 1; static float engBrake = 1.f, clutchKey, hbrake, freeRpm = 900.f, shiftT, stallT;   // clutchAssist: 1 = shifts cut power briefly, no grinding / stalling   // manualGear: 0 = auto, 1 = manual gearbox (player only)
 typedef struct { float x, y, z, vx, vy, vz, im, r, rc; uint8_t gnd, t; } Node;   // t: 0 body, 1 car wheel, 2 trailer wheel
@@ -711,7 +712,7 @@ static void barrel_blow(int oi) {                         // explosive barrel: b
   for (int i = 0; i < nb; i++) if (bm[i].o == 2 && bm[i].a >= base && bm[i].a < base + 8) bm[i].f = 2;
   float cx = (n[4].x + n[5].x) * .5f, cz = (n[4].z + n[5].z) * .5f, ddx = cx - bx, ddz = cz - bz, dd = fsqrt(ddx * ddx + ddz * ddz);
   if (dd < 12.f && flashT < .6f) flashT = .6f;
-  if (dd < 5.f && !burning && fuel > .03f) { burning = 1; fireT = 0.f; fireI = .2f; boomAt = 1e9f; }
+  if (dd < 5.f && !burning && fuel > .03f && !(optGod && n == nPl)) { burning = 1; fireT = 0.f; fireI = .2f; boomAt = 1e9f; }
 }
 // ---- random events (city map only): crashed cars blocking a street, roadworks, a convoy on the ring roads.
 // Obstacles are oriented boxes (hx,hz = heading, hl = half length along it, hw = half width across it, h = height).
@@ -768,26 +769,29 @@ static void step(float dt) {
   uint8_t awake[12]; if (nobj) { float acx = (n[4].x + n[5].x) * .5f, acz = (n[4].z + n[5].z) * .5f; for (int o = 0; o < nobj; o++) { float dx = n[nob0 + o * 8].x - acx, dz = n[nob0 + o * 8].z - acz; awake[o] = dx < 60.f && dx > -60.f && dz < 60.f && dz > -60.f; } }
 #define ASLEEP(i) (nobj && (i) >= nob0 && !awake[((i) - nob0) >> 3])   // far objects are frozen (saves CPU)
   for (int i = 0; i < nn; i++) if (!ASLEEP(i)) n[i].vy -= G * dt;
+  const int god = optGod && n == nPl;
   for (int i = 0; i < nb; i++) {
-    Beam *b = &bm[i];
+    Beam *b = &bm[i]; const int gb = god && b->o != 2;   // gb: this beam can neither bend nor break
     if (b->f == 2) { if (b->o == 0) tot += b->t0 == 0 ? .45f : (b->t0 == 4 ? .08f : 0); continue; }
     if (b->o == 2 && ASLEEP(b->a)) continue;
     Node *p = &n[b->a], *q = &n[b->b];
     float dx = q->x - p->x, dy = q->y - p->y, dz = q->z - p->z, L = fsqrt(dx * dx + dy * dy + dz * dz) + 1e-4f;
     float ux = dx / L, uy = dy / L, uz = dz / L;
-    float F = (b->k * (L - b->l0) + b->c * ((q->vx - p->vx) * ux + (q->vy - p->vy) * uy + (q->vz - p->vz) * uz)) * dt;
+    float ext = L - b->l0; if (gb) { float mx = .5f * b->l0; ext = ext > mx ? mx : (ext < -mx ? -mx : ext); }   // unbreakable: bounded force, the simulation cannot blow up
+    float F = (b->k * ext + b->c * ((q->vx - p->vx) * ux + (q->vy - p->vy) * uy + (q->vz - p->vz) * uz)) * dt;
     p->vx += F * ux * p->im; p->vy += F * uy * p->im; p->vz += F * uz * p->im;
     q->vx -= F * ux * q->im; q->vy -= F * uy * q->im; q->vz -= F * uz * q->im;
     float e = (L - b->l0) / b->l0;
     if (b->f == 0) {
-      if (e > b->yl) b->l0 += (e - b->yl) * b->l0 * .5f; else if (e < -b->yl) b->l0 += (e + b->yl) * b->l0 * .5f;
-      if (e > b->bk) b->f = 2;
+      if (gb) b->l0 = b->lr;
+      else { if (e > b->yl) b->l0 += (e - b->yl) * b->l0 * .5f; else if (e < -b->yl) b->l0 += (e + b->yl) * b->l0 * .5f;
+        if (e > b->bk) b->f = 2; }
       if (b->o == 2 && nobj) { int oi = (b->a - nob0) >> 3; if (oi >= 0 && oi < nobj && okind[oi] == 4 && !objDead[oi]) { float dd = (b->l0 - b->lr) / b->lr; if (dd < 0) dd = -dd; if (dd > .2f || b->f == 2) barrel_blow(oi); } }
       if (b->o == 0) { float d = (b->l0 - b->lr) / b->lr; tot += d < 0 ? -d : d; }
     } else if (b->f == 1) {
-      if (e > b->bk) { b->f = 2; if (b->o == 0) wAtt[b->g]--; }
-    } else if (b->f == 3) { if (L - b->l0 > b->bk) b->f = 2; }
-    else if (L - b->l0 > b->bk || b->l0 - L > b->bk * 1.4f) {   // panel attachment tears or is crushed
+      if (e > b->bk && !gb) { b->f = 2; if (b->o == 0) wAtt[b->g]--; }
+    } else if (b->f == 3) { if (L - b->l0 > b->bk && !gb) b->f = 2; }
+    else if (!gb && (L - b->l0 > b->bk || b->l0 - L > b->bk * 1.4f)) {   // panel attachment tears or is crushed
       b->f = 2;
       if (--pAtt[b->g] * 100 <= pAtt0[b->g] * (optBody && n == nPl && (b->g == 1 || b->g == 2) ? 14 : 45) && pAtt[b->g] > 0) {   // enough attachments gone: the part comes off
         int gg = b->g; for (int q = 0; q < nb; q++) if (bm[q].f == 4 && bm[q].g == gg) bm[q].f = 2;
@@ -802,6 +806,7 @@ static void step(float dt) {
     if (p->t == 9) { p->vx = p->vy = p->vz = 0.f; continue; }
     if (ASLEEP(i)) continue;
     p->vx *= .9997f; p->vy *= .9997f; p->vz *= .9997f;
+    if (god) { float v2 = p->vx * p->vx + p->vy * p->vy + p->vz * p->vz; if (v2 > 40000.f) { float kk = 200.f / fsqrt(v2); p->vx *= kk; p->vy *= kk; p->vz *= kk; } else if (!(v2 == v2)) p->vx = p->vy = p->vz = 0.f; }   // speed cap + NaN guard
     p->x += p->vx * dt; p->y += p->vy * dt; p->z += p->vz * dt;
     p->gnd = 0;
     float g = gh(p->x, p->z), pen = g + p->r - p->y;
@@ -810,7 +815,7 @@ static void step(float dt) {
       float il = 1.f / fsqrt(1 + gx * gx + gz * gz), nx = -gx * il, ny = il, nz = -gz * il, d = pen * il; if (d > .25f) d = .25f;
       p->x += nx * d; p->y += ny * d; p->z += nz * d; p->gnd = 1;
       float vn = p->vx * nx + p->vy * ny + p->vz * nz;
-      if (optPunct && tpOn && p->t == 1 && vn < -9.f && i >= 14 && i < 18) { int w = i - 14; if (!tpLeak[w] && fx_rand() < (-vn - 9.f) * .12f) tpLeak[w] = 1; }   // hard impact: burst tyre
+      if (optPunct && !god && tpOn && p->t == 1 && vn < -9.f && i >= 14 && i < 18) { int w = i - 14; if (!tpLeak[w] && fx_rand() < (-vn - 9.f) * .12f) tpLeak[w] = 1; }   // hard impact: burst tyre
       { float rb = p->t == 1 ? 1.f : 1.1f; if (vn < 0) { p->vx -= vn * nx * rb; p->vy -= vn * ny * rb; p->vz -= vn * nz * rb; } }
       if (p->t == 1 && wAtt[i - 14] > 0) { if (i >= 16) tire(p, hx * c + hz * s, hz * c - hx * s, nx, ny, nz, 1, dt); else tire(p, hx, hz, nx, ny, nz, 1, dt); }
       else if (p->t == 2) tire(p, thx, thz, nx, ny, nz, 0, dt);
@@ -982,6 +987,7 @@ static void fx_update(float dt) {                 // once per frame
   }
   if (exploded) boomT += dt;
   if (flashT > 0.f) flashT -= dt * 3.5f;
+  if (optGod && n == nPl) { burning = exploded = 0; fireI = fireT = 0.f; boomAt = 1e9f; radHp = tankHp = shaftHp = 1.f; coolant = 1.f; engTemp = .35f; dmg = 0.f; pw = sh = 1.f; for (int w = 0; w < 4; w++) tpLeak[w] = 0; }   // unbreakable: nothing burns, leaks or fails
   driveEff = sh * pw * (fuel > .005f ? 1.f : 0.f) * (exploded ? 0.f : 1.f);
 }
 

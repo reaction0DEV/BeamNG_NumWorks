@@ -93,6 +93,8 @@ Max speed, Acceleration, Lateral grip, Gravity, Overall grip, Turbo speed, Turbo
 
 **Safety unlock** (Options -> System -> Dev variables): removes the min/max limits. OK on a variable opens free keyboard entry (0-9, dot, minus sign; Clear fixes a typo, empty field + Clear = default value). The only remaining limit is ±100000, to avoid infinite values. Warning: extreme values can make the physics blow up.
 
+**Unbreakable** (Options -> System -> Dev variables, developer mode on): the player's car cannot break whatever the impact or power. No beam breaks or bends, no punctures, leaks, fire or explosion, and the engine never fails. Part speed is capped at 200 m/s and beam force is bounded so the simulation cannot blow up. If the car was already damaged, use "Repair all" (quick menu). The setting is saved.
+
 ## 10. Python script mods
 
 Functions: `vehicle`, `map`, `ramp`, `hills`, `loop`, `object`, `start`, `power`, `mode`, plus variables and simple calculations (the French names `vehicule`, `carte`, `rampe`, `colline`, `boucle`, `objet`, `depart`, `pouvoir` also work).

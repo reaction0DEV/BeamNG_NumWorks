@@ -93,6 +93,8 @@ Vitesse max, Accélération, Adhérence latérale, Gravité, Adhérence globale,
 
 **Débridage de sécurité** (Options → Système → Variables dev) : retire les limites min/max. OK sur une variable ouvre une saisie libre au clavier (0-9, point, signe moins ; Effacer corrige, champ vide + Effacer = valeur par défaut). Seule limite restante : ±100000 pour éviter les valeurs infinies. Attention : des valeurs extrêmes peuvent faire exploser la physique.
 
+**Incassable** (Options → Système → Variables dev, mode développeur actif) : la voiture du joueur ne peut plus rien casser, quel que soit le choc ou la puissance. Aucune poutre ne casse ni ne se déforme, pas de crevaison, de fuite, d'incendie ni d'explosion, et le moteur ne tombe jamais en panne. La vitesse des pièces est plafonnée à 200 m/s et la force des poutres est bornée pour que la simulation ne parte pas en vrille. Si la voiture était déjà abîmée, utilise « Réparer tout » (menu rapide). Le réglage est sauvegardé.
+
 ## 10. Mods par scripts Python
 
 Fonctions : `vehicule`, `carte`, `rampe`, `colline`, `boucle`, `objet`, `depart`, `pouvoir`, `mode`, plus variables et calculs simples.
