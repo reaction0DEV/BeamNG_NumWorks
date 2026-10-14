@@ -1678,7 +1678,7 @@ static void cmap_use(int k) {
   for (int i = 0; i < M->no; i++) { cmOk[i] = M->ok[i]; cmOx[i] = M->ox[i]; cmOz[i] = M->oz[i]; }
 }
 static void map_set(int u) { int t = map_total(); u = ((u % t) + t) % t; if (u < NMAPB) { mapId = u; cmap_use(-1); } else { mapId = 4; cmap_use(u - NMAPB); } }
-static float menuT; static int menuPlain;   // menuPlain: 1er lancement = ecran d'accueil sans scene 3D (la map n'apparait qu'apres)
+static float menuT; static int menuPlain, menuFirst;   // menuPlain: 1er lancement = ecran d'accueil sans scene 3D (la map n'apparait qu'apres)
 static void menu_init(void) { garage_car(); traffic_reset(); skid_clear(); part_clear(); menuT = 0.f; }
 static void menu_bg(void) {                // slow cinematic orbit around the selected map, running live physics / traffic
   thr = 0; brk = 0; steer = 0; turbo = 0;
@@ -1704,9 +1704,12 @@ static void draw_menu(int sel) {
     row(s, 4, 52 + i * 24, 144, 22, i == sel); }
   if (menuPlain) {
     eadk_display_push_rect_uniform((eadk_rect_t){154, 0, 166, 224}, BGC);
-    txt("Welcome!", 190, 80, 1, 0xFFFF, BGC);
-    txt("OK on Play to drive", 172, 112, 0, ACC, BGC);
-    txt("Garage / Options: at your pace", 166, 128, 0, C(130, 134, 146), BGC);
+    if (menuFirst) {
+      txt("Welcome!", 190, 80, 1, 0xFFFF, BGC);
+      txt("OK on Play to drive", 172, 112, 0, ACC, BGC);
+      txt("Garage / Options: at your pace", 166, 128, 0, C(130, 134, 146), BGC);
+  
+    }
   }
   txt("Up/Down  Left/Right  OK", 4, 226, 0, C(110, 114, 126), BGC);
   char t[40], *q = t; q = cat(q, "Map: "); cat(q, map_name()); txt(t, 162, 226, 0, ACC, BGC);
@@ -2381,7 +2384,7 @@ int main(void) {
   int st = S_MENU, sel = 0, redraw = 1, gsel = 0, gview = 0, cap = 0, fr = 0, lap = 1, best = 0, cp = 0;
   float acc = 0, stw = 0, pz = 0, gorb = .6f, gelev = 3.6f, gzoom = 7.5f, shx = 0, shz = 1, yawO = 0, hO = 0, dO = 0; uint64_t last = eadk_timing_millis(), lapT = last;
   for (int i = 0; i < NA; i++) bind[i] = BDEF[i];
-  { uint32_t fn = 0; menuPlain = !ef_read(CFG_FILE, &fn) && !ef_read(REC_FILE, &fn); }   // aucun fichier de sauvegarde = premier lancement
+  { uint32_t fn = 0; menuFirst = !ef_read(CFG_FILE, &fn) && !ef_read(REC_FILE, &fn); menuPlain = 1; }   // aucun fichier de sauvegarde = premier lancement
   gen_car(genSeed); rec_load(); cfg_load(); mods_load(); dev_apply();
 #ifdef TESTQ
   qual = TESTQ;
