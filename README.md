@@ -9,6 +9,11 @@ Everything runs in real time on the calculator: software 3D rendering, deformabl
 
 > This is the **English version**: the in-game text is in English and ASCII only (the calculator font has no accents). The French version is in the `NumBeam3D_FR` folder.
 
+# Download
+
+📥 **Download NumBeam 3D :** [Click here to download the latest version(`EN.NumBeam3D.nwa`)](https://github.com/reaction0DEV/BeamNG_NumWorks/releases/download/V1.2/EN.NumBeam3D.nwa)
+
+
 ## Highlights
 
 - **Deformable body**: the car is a mesh of nodes and beams. It bends, breaks, and loses its windows, mirrors and bumpers.
