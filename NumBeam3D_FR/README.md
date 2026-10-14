@@ -17,12 +17,12 @@ Tout tourne en temps réel sur la calculatrice : rendu 3D logiciel, physique de 
 - **6 cartes** : Circuit, Route, Crash-test, Ville, Vide (rampes et loopings) et **Italie** (route de campagne sans fin, villages, collines toscanes).
 - **16 véhicules**, 4 moteurs, 4 types de roues, 4 suspensions, 3 châssis, 4 remorques.
 - **Défis** : livraisons chronométrées, crash-tests, tutoriel, 29 succès, statistiques à vie.
-- **Mods en Python** : ajoute tes véhicules, cartes, pouvoirs et modes de jeu avec de simples scripts, sans recompiler (voir [`MANUEL_MODS.md`](./NumBeam3D_FR/modding/MANUEL_MODS.md)).
+- **Mods en Python** : ajoute tes véhicules, cartes, pouvoirs et modes de jeu avec de simples scripts, sans recompiler (voir [`MANUEL_MODS.md`](modding/MANUEL_MODS.md)).
 - **Mode développeur** : 10 variables physiques réglables (gravité, adhérence, vitesse max, turbo…), avec un **débridage de sécurité** optionnel pour saisir n'importe quelle valeur.
 - **Mini-carte** : en Ville et maintenant aussi en Italie (carte défilante centrée sur la voiture).
 - **Option « Objets sur la route »** : cônes, caisses, barils et mur de pneus peuvent être retirés (Options → Monde, ou menu rapide).
 
-La liste complète de ce que contient le programme est dans [`CONTENU.md`](./NumBeam3D_FR/info/CONTENU.md).
+La liste complète de ce que contient le programme est dans [`CONTENU.md`](info/CONTENU.md).
 
 ## Contenu du dépôt
 
@@ -50,7 +50,7 @@ make run      # installe sur la calculatrice branchée en USB
 make clean    # supprime output/
 ```
 
-Guide détaillé (Windows, macOS, Linux, dépannage) : [`COMPILER.md`](./NumBeam3D_FR/info/COMPILER.md).
+Guide détaillé (Windows, macOS, Linux, dépannage) : [`COMPILER.md`](info/COMPILER.md).
 
 Le Makefile attend les sources dans `src/` (`main.c`, `sim.h`, `epsilon_app.h`, `epsilon_files.h`) et `icon.png` à la racine, à côté du `Makefile`.
 
@@ -104,7 +104,7 @@ pouvoir("Lune", gravite=3, duree=15)
 mode("Course lunaire", carte="Arene", vehicule="Fusee", gravite=6)
 ```
 
-Limites : 8 véhicules, 4 cartes, 8 pouvoirs, 8 modes. Détails dans [`MANUEL_MODS.md`](./NumBeam3D_FR/modding/MANUEL_MODS.md).
+Limites : 8 véhicules, 4 cartes, 8 pouvoirs, 8 modes. Détails dans [`MANUEL_MODS.md`](modding/MANUEL_MODS.md).
 
 ## Notes techniques
 
