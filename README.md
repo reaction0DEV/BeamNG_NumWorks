@@ -11,7 +11,7 @@ Everything runs in real time on the calculator: software 3D rendering, deformabl
 
 # Download
 
-📥 **Download NumBeam 3D :** [Click here to download the latest version(`EN.NumBeam3D.nwa`)](https://github.com/reaction0DEV/BeamNG_NumWorks/releases/download/V1.2/EN.NumBeam3D.nwa)
+📥 **Download NumBeam 3D :** [Click here to download the latest version(`EN.NumBeam3D.nwa`)](https://github.com/reaction0DEV/BeamNG_NumWorks/releases/download/V1.2.1/EN.NumBeam3D.nwa)
 
 
 ## Highlights
